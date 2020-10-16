@@ -354,9 +354,7 @@ __Alles was jetzt kummt isch risky business bin ma ned sicher, ob des so passt__
 
 
 __INFO__
-https://rviews.rstudio.com/2018/02/08/capm-beta/
-https://github.com/rstudio/cheatsheets/blob/master/purrr.pdf
-Kann nur dia Website empfehle als alternativ Lösung, aber wegat am Market Input tät i obacht gea, weil mit getSymbols gohts ned zumindest ned bei mir.
+Kann nur dia Files empfehle als alternativ Lösung, aber wegat am Market Input tät i obacht gea, weil mit getSymbols gohts ned zumindest ned bei mir.
 
 ```{r Estimating beta with the market??????????????????????????}
 #Create XTS
