@@ -371,6 +371,9 @@ Subtract the risk-free rate from the first set of 10 portfolios (only sorted on 
 ten_portf <- portf_mkt_beta[1:660, -c(2:6)]
 ten_portf_joined <- left_join(mkt_factors, ten_portf)
 
+mkt_factors
+ten_portf
+ten_portf_joined
 
 ```
 ```{r, echo=FALSE}
@@ -479,10 +482,22 @@ plot.default(x = betas_ten_portf, xlim=c(0, 2),
              main = "Return/Beta-combinations 1964-2018",
              abline(0, y_mkt))
 summary_CAPM_ten_portf
+
+
 ```
 
 
 b)	In the second-pass regression we now regress the average stock returns on the betas estimated before. What do you find in the coefficients and does this contradict the CAPM? Try different time periods again and see what you find. (all of the interpretations are in BKM pp.416f). 
+
+There are a number of reasons we expect might the CAPM to
+fail:
+1. Imperfect measures of the market portfolio
+2. Beta is an incomplete measure of risk
+3. Tax effects
+4. Non - normality of returns
+5. No riskless asset
+6. Divergent borrowing and lending rates
+
 c)	Now do the extended second pass regression (regress on betas and residual-sds that you can extract from the regression) and see what you find for different periods. Interpret according to concept check 13.2. One of the (many) problems of the CAPM can be the correlation between residual variances and betas. Calculate and interpret.
 
 ```{r}
@@ -568,6 +583,7 @@ twentyfive_portf_rf <- twentyfive_portf_rf[-2:-10]
 #substract Risk-Free-Rate
 twentyfive_portf_rf <- mutate(twentyfive_portf_joined, Lo20rf = Lo20 - RF, Qnt2rf = Qnt2 - RF, Qnt3rf = Qnt3 - RF, Qnt4rf = Qnt4 - RF, Hi20rf = Hi20 - RF)
 twentyfive_portf_rf <- twentyfive_portf_rf[-2:-10]
+
 
 #Create XTS
 twentyfive_portf_rf_xts <- twentyfive_portf_rf %>%
