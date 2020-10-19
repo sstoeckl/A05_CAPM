@@ -1,7 +1,7 @@
 ---
 title: "Portfoliomanagement and Financial Analysis - Assignment 5"
 subtitle: "Submit until Monday 2019-10-29, 13:00"
-author: "Lastname, Surname"
+author: "Macanovic, Stefan"
 output: html_notebook
 ---
   
@@ -23,6 +23,424 @@ b) Maximum Quadratic Utility Portfolios
 
 adding (individually/together) all the different constraints and highlighting the different portfolios (portfolios performances) including rebalancing over an appropriate time-frame. The goal is, that after doing this exercise you are familiar with the constraints and their consequences.
 
+
+```{r}
+#download data
+
+stockselection <- c("MSFT", "AAPL", "WMT", "BA", "GS", "MMM", "ADSK", "CSCO", "ADBE", "AMZN")
+
+#Get the prices of the stocks to transmute it to returns
+stock.prices <- stockselection %>%
+  tq_get(get  = "stock.prices", from = "2000-01-01",to = "2020-09-30") %>%
+  group_by(symbol)
+
+stock.prices
+```
+
+```{r}
+
+
+#Create monthly returns
+stock.returns.monthly <- stock.prices %>%  
+  tq_transmute(select = adjusted,
+               mutate_fun = periodReturn,
+               period="monthly",
+               type="arithmetic",
+               col_rename = "Stock.returns"
+               )
+stock.returns.monthly
+```
+
+```{r}
+#put it into a tibble
+
+R <- pivot_wider(stock.returns.monthly,
+                                                names_from = symbol,
+                                                values_from = c(Stock.returns))%>% 
+  tk_xts(date_var = date, silent = TRUE)
+
+tk_xts
+
+#colnames(R) <- stockselection #nachschauen was für eine Funktion colnames hat
+#funds <- colnames(R)
+
+```
+
+a) Minimum Variance Portfolio
+
+###first example is with the full investment constraint
+
+```{r}
+# Create portfolio object
+portf_minvar <- portfolio.spec(assets=stockselection)
+# Add full investment constraint to the portfolio object
+portf_minvar <- add.constraint(portfolio=portf_minvar, type="full_investment")
+# Add objective to minimize variance
+portf_minvar <- add.objective(portfolio=portf_minvar, type="risk", name="var")
+portf_minvar
+```
+
+
+```{r}
+# Run the optimization - minimum variance portfolio
+opt_gmv <- optimize.portfolio(R=R, portfolio=portf_minvar,
+                              optimize_method="ROI", trace=TRUE)
+print(opt_gmv)
+```
+
+
+```{r}
+portf_minvaref<- create.EfficientFrontier(R=R, portfolio = portf_minvar, type = "mean-StdDev", match.col = "StdDev")
+chart.EfficientFrontier(portf_minvaref, match.col = "StdDev", type = "b", rf = NULL, pch.assets = 1)
+```
+
+
+```{r}
+#rebalancing
+bt_gmv <- optimize.portfolio.rebalancing(R=R,portfolio=portf_minvar,
+                                         optimize_method="ROI",
+                                         rebalance_on="months",
+                                         training_period=156)
+
+#we chose a training period of 156 months --> 13 years to have enough historical data to use for rebalancing and moreover our chart is easier to read
+#furthermore, we chose monthly rebalancing, because we have monthly data and it is important to rebalance as soon and as often as possible
+
+bt_gmv
+
+chart.Weights(bt_gmv)
+returns_gmv <- Return.portfolio(R = R, weights = extractWeights(bt_gmv))
+```
+
+###second we use a long-only constraint
+
+```{r}
+# Add long only constraints to a new portfolio to show the difference
+#so we do not allow for short selling now
+
+portf_minvar_2 <- portfolio.spec(assets=stockselection)
+portf_minvar_2 <- add.constraint(portfolio=portf_minvar_2, type="box",
+                               min=0, max=1)
+portf_minvar_2 <- add.objective(portfolio=portf_minvar_2, type="risk", name="var")
+portf_minvar_2
+```
+
+```{r}
+#Optimization
+# Run the optimization
+opt_minvar_2 <- optimize.portfolio(R=R, portfolio=portf_minvar_2,
+                                 optimize_method="ROI", trace=TRUE)
+print(opt_minvar_2)
+```
+
+We plot the efficient frontier (long only) to compare it with the first plot which has the full investment constraint.
+
+```{r}
+portf_minvaref_2 <- create.EfficientFrontier(R=R, portfolio = portf_minvar_2, type = "mean-StdDev", match.col = "StdDev")
+chart.EfficientFrontier(portf_minvaref_2, match.col = "StdDev", type = "b", rf = NULL, pch.assets = 1)
+```
+
+Now we do not go for short in any stock.
+
+```{r}
+bt_minvar_2 <- optimize.portfolio.rebalancing(R=R, portfolio=portf_minvar_2,
+                                            optimize_method="ROI",
+                                            rebalance_on="months",
+                                            training_period=156)
+
+bt_minvar_2
+
+chart.Weights(bt_minvar_2)
+returns_minvar <- Return.portfolio(R = R, weights = extractWeights(bt_minvar_2))
+```
+
+###third we use group constraint
+Our stocks:
+"MSFT" "AAPL" "WMT"  "BA"   "GS"   "MMM"  "ADSK" "CSCO" "ADBE" "AMZN"
+
+Grouped by sector:
+Group A: MSFT, AAPL, ADSK, ADBE, CSCO - Software Companies
+Group B: WMT, AMZN - online and offline shopping
+Group C: BA, GS, MMM - rest
+
+```{r}
+# Add group constraints to a new one in order to compare it and see differences
+portf_minvar_3 <- portfolio.spec(assets=stockselection)
+portf_minvar_3 <- add.constraint(portfolio=portf_minvar_3,
+                               type="group",
+                               groups=list(groupA=c(1,2,7,8,9),
+                                           groupB=c(3,10),
+                                           groupC=c(4,5,6)),
+                               group_min=c(0.3, 0.2, 0),
+                               group_max=c(0.8, 0.7, 0.5))
+portf_minvar_3 <- add.objective(portfolio=portf_minvar_3, type="risk", name="var")
+portf_minvar_3
+```
+
+```{r}
+#Optimization
+# Run the optimization
+opt_minvar_3 <- optimize.portfolio(R=R, portfolio=portf_minvar_3,
+                                 optimize_method="ROI", trace=TRUE)
+print(opt_minvar_3)
+```
+```{r}
+portf_minvaref_3 <- create.EfficientFrontier(R=R, portfolio = portf_minvar_3, type = "mean-StdDev", match.col = "StdDev")
+chart.EfficientFrontier(portf_minvaref_3, match.col = "StdDev", type = "b", rf = NULL, pch.assets = 1)
+```
+
+
+```{r}
+bt_minvar_3 <- optimize.portfolio.rebalancing(R=R, portfolio=portf_minvar_3,
+                                            optimize_method="ROI",
+                                            rebalance_on="months",
+                                            training_period=156)
+
+bt_minvar_3
+
+chart.Weights(bt_minvar_3)
+returns_minvar <- Return.portfolio(R=R, weights=extractWeights(bt_minvar_3))
+```
+
+###now we put two constraints together
+- add.constraint(portfolio=pspec, type="return", return_target=0.007)
+```{r}
+portf_minvar_4 <- portfolio.spec(assets=stockselection)
+portf_minvar_4 <- add.constraint(portfolio=portf_minvar_4, type="box",
+                               min=0, max=1)
+portf_minvar_4 <- add.objective(portfolio=portf_minvar_4, type="risk", name="var")
+portf_minvar_4 <- add.constraint(portfolio=portf_minvar_4,
+                               type="group",
+                               groups=list(groupA=c(1,2,7,8,9),
+                                           groupB=c(3,10),
+                                           groupC=c(4,5,6)),
+                               group_min=c(0.3, 0.2, 0),
+                               group_max=c(0.8, 0.7, 0.5))
+portf_minvar_4
+```
+
+```{r}
+#Optimization
+# Run the optimization
+opt_minvar_4 <- optimize.portfolio(R=R, portfolio=portf_minvar_4,
+                                 optimize_method="ROI", trace=TRUE)
+print(opt_minvar_4)
+```
+
+```{r}
+bt_minvar_4 <- optimize.portfolio.rebalancing(R=R, portfolio=portf_minvar_4,
+                                            optimize_method="ROI",
+                                            rebalance_on="months",
+                                            training_period=156)
+
+bt_minvar_4
+
+chart.Weights(bt_minvar_4)
+returns_minvar <- Return.portfolio(R=R, weights=extractWeights(bt_minvar_4))
+```
+b) Maximum Quadratic Utility Portfolios
+
+### Maximum Quadratic Utility Portfolio with full investment constraint and long only constraint
+
+First, we create the initial portfolio object.
+```{r}
+init_portf <- portfolio.spec(assets=stockselection)
+```
+
+Then, we create our constraints and cominbe them in a list. 
+```{r}
+fi_constr <- weight_sum_constraint(type="full_investment")
+lo_constr <- box_constraint(type="long_only", assets=init_portf$assets)
+qu_constr <- list(fi_constr, lo_constr)
+```
+
+Next, we create the objective. The variance objective specifies a risk aversion parameter which defines how much variance is accepted. 
+After that, we combine these objectives in a list. 
+```{r}
+ret_obj <- return_objective(name="mean")
+
+var_obj <- portfolio_risk_objective(name="var", risk_aversion=4.00)
+qu_obj <- list(ret_obj, var_obj)
+```
+
+Next, we run the optimization. 
+```{r}
+opt_qu <- optimize.portfolio(R=R, portfolio=init_portf,
+                             constraints=qu_constr,
+                             objectives=qu_obj,
+                             optimize_method="ROI",
+                             trace=TRUE)
+opt_qu
+```
+
+Now, we chart the weights, using a training period of 156. As we can see, it rebalances on 94 dates. 
+```{r}
+bt_qu <- optimize.portfolio.rebalancing(R=R, portfolio=init_portf,
+                                        constraints=qu_constr,
+                                        objectives=qu_obj,
+                                        optimize_method="ROI",
+                                        rebalance_on="months",
+                                        training_period=156)
+print(bt_qu)
+
+chart.Weights(bt_qu)
+returns_qu <- Return.portfolio(R = R, weights = extractWeights(bt_qu))
+```
+
+### Maximum Quadratic Utility Portfolio with group constraint
+
+Our stocks:
+"AMZN","ADBE","MSFT","JNJ","PG","AXP","BAC","AAPL","T","CAT"
+
+Grouped as follows:
+Group A: AMZN, ADBE, BAC, AAPL, T
+Group B: MSFT, CAT
+Group C: JNJ, PG, AXP
+
+We tell it to invest as follows in the groups
+Group A: 30% - 80% 
+Group B: 20% - 70%
+Group C: 0%  - 50%
+So the groups we created have to add up to the weight intervals we defined.
+
+We create our second portfolio object.
+```{r}
+init_portf_2 <- portfolio.spec(assets=stockselection)
+```
+
+Now, we add the constraint and combine them in a list. 
+```{r}
+group_constr <- group_constraint(assets=stockselection,groups=list(groupA=c(1,2,7,8,9), groupB=c(3,10),groupC=c(4,5,6)),group_min=c(0.3, 0.2, 0),group_max=c(0.8, 0.7, 0.5))
+qu_constr_2 <- list(group_constr)
+```
+
+Next, we create the return objectives. We use the same as before.  
+````{r}
+ret_obj <- return_objective(name="mean")
+var_obj <- portfolio_risk_objective(name="var", risk_aversion=4.00)
+qu_obj <- list(ret_obj, var_obj)
+```
+
+Now, we run the optimization. 
+```{r}
+opt_qu_2 <- optimize.portfolio(R=R, portfolio=init_portf_2,
+                             constraints=qu_constr_2,
+                             objectives=qu_obj,
+                             optimize_method="ROI",
+                             trace=TRUE)
+opt_qu_2
+```
+Now, we rebalance it with training period = 156 (13 years).
+```{r}
+bt_qu_2 <- optimize.portfolio.rebalancing(R=R, portfolio=init_portf_2,
+                                        constraints=qu_constr_2,
+                                        objectives=qu_obj,
+                                        optimize_method="ROI",
+                                        rebalance_on="months",
+                                        training_period=156)
+print(bt_qu_2)
+
+chart.Weights(bt_qu_2)
+returns_qu_2 <- Return.portfolio(R = R, weights = extractWeights(bt_qu_2))
+```
+
+### Maximum Quadratic Utility Portfolio with traget return constraint
+
+
+
+We create our second portfolio object.
+```{r}
+init_portf_3 <- portfolio.spec(assets=stockselection)
+```
+
+Now, we add the constraint and combine them in a list. 
+```{r}
+ret_constr <- return_constraint(return_target=0.007)
+qu_constr_3 <- list(ret_constr)
+```
+
+Next, we create the return objectives. We use the same as before.  
+````{r}
+ret_obj <- return_objective(name="mean")
+var_obj <- portfolio_risk_objective(name="var", risk_aversion=4.00)
+qu_obj <- list(ret_obj, var_obj)
+```
+
+Now, we run the optimization. As we can see, our mean is exactly what we wanted it to be - 0.007.
+```{r}
+opt_qu_3 <- optimize.portfolio(R=R, portfolio=init_portf_3,
+                             constraints=qu_constr_3,
+                             objectives=qu_obj,
+                             optimize_method="ROI",
+                             trace=TRUE)
+opt_qu_3
+```
+
+Now, we rebalance it with training period = 156 (13 years).
+```{r}
+bt_qu_3 <- optimize.portfolio.rebalancing(R=R, portfolio=init_portf_3,
+                                        constraints=qu_constr_3,
+                                        objectives=qu_obj,
+                                        optimize_method="ROI",
+                                        rebalance_on="months",
+                                        training_period=156)
+print(bt_qu_3)
+
+chart.Weights(bt_qu_3)
+returns_qu_3 <- Return.portfolio(R = R, weights = extractWeights(bt_qu_3))
+```
+
+### Maximum Quadratic Utility Portfolio with Factor Exposure Constraint
+
+The factor exposure constraint allows the user to set upper and lower bounds on exposures to risk factors. The exposures can be passed in as a vector or matrix. Here we specify a vector for B with arbitrary values, e.g. betas of the assets, with a market risk exposure range of 0.6 to 0.9.
+
+We create our second portfolio object.
+```{r}
+init_portf_4 <- portfolio.spec(assets=stockselection)
+```
+
+Now, we add the constraint and combine them in a list. 
+```{r}
+exp_constr <- factor_exposure_constraint(assets=stockselection,B=c(-0.08, 0.37, 0.79, 1.43, 0.34, 1.2, 0.79, 1.12, 0.94, 1.23),lower=0.6, upper=0.9)
+qu_constr_4 <- list(exp_constr)
+```
+
+Next, we create the return objectives. We use the same as before.  
+````{r}
+ret_obj <- return_objective(name="mean")
+var_obj <- portfolio_risk_objective(name="var", risk_aversion=4.00)
+qu_obj <- list(ret_obj, var_obj)
+```
+
+Now, we run the optimization. 
+```{r}
+opt_qu_4 <- optimize.portfolio(R=R, portfolio=init_portf_4,
+                             constraints=qu_constr_4,
+                             objectives=qu_obj,
+                             optimize_method="ROI",
+                             trace=TRUE)
+opt_qu_4
+```
+
+Now, we rebalance it with training period = 156 (13 years).
+```{r}
+bt_qu_4 <- optimize.portfolio.rebalancing(R=R, portfolio=init_portf_4,
+                                        constraints=qu_constr_4,
+                                        objectives=qu_obj,
+                                        optimize_method="ROI",
+                                        rebalance_on="months",
+                                        training_period=156)
+print(bt_qu_4)
+
+chart.Weights(bt_qu_4)
+returns_qu_4 <- Return.portfolio(R = R, weights = extractWeights(bt_qu_4))
+```
+
+Constraints that do not work with ROI
+- position limit constraints
+- diversification constraint
+- turnover constraint
+
+
 ## Exercise 2: Estimating the CAPM
 
 In this exercise we want to estimate the CAPM. Please read carefully through the two documents provided (right hand side: files). Then we start to collect the necessary data:
@@ -32,6 +450,519 @@ b) Further import the Fama-French-Factors from Kenneth Frenchs homepage (monthly
 c) Now subtract the risk-free rate from all the stocks. Then estimate each stocks beta with the market: Regress all stock excess returns on the market excess return and save all betas (optimally use `mutate` and `map` in combination with `lm`). Estimate the mean-return for each stock and plot the return/beta-combinations. Create the security market line and include it in the plot! What do you find?
 d) In a next step (following both documents), we sort the stocks according to their beta and build ten value-weighted portfolios (with more or less the same number of stocks). Repeat a) for the ten portfolios. What do you observe?
 e) In the third step you follow page 6-8 of the second document and estimate the second-pass regression with the market and then market & idiosyncratic risk. What do you observe? Present all your results in a similar fashion as in the document.
+## Exercise 2: Estimating the CAPM
+
+In this exercise we want to estimate the CAPM. Please read carefully through the two documents provided (right hand side: files). Then we start to collect the necessary data:
+
+a) From Datastream get the last 10 years of data from the 100 stocks of the S&P100 using the list `LS&P100I` (S&P 100): total return index (RI) and market cap (MV)
+
+```{r}
+library(readxl)
+sp100_daily_RI <- read_excel("sp100 daily RI_2.xlsx")
+head(sp100_daily_RI, n=10)
+```
+
+b) Further import the Fama-French-Factors from Kenneth Frenchs homepage (monthly, e.g. using `FFdownload`). From both datasets we select data for the last (available) 60 months, calculate returns (simple percentage) for the US-Stocks and eliminate those stocks that have NAs for this period.
+
+```{r}
+# FF_worker because the sstoeckl/FFdownload had an issue in the converter (daily,..)
+FF_worker <- function(output_file = "data.Rdata", tempdir=NULL) {
+
+csv_files <- list.files(tempdir, full.names = TRUE, pattern = "\\.csv$", ignore.case = TRUE) # full path
+csv_files2 <- list.files(tempdir, full.names = FALSE, pattern = "\\.csv$", ignore.case = TRUE) # only filenames
+
+vars <- paste0("x_", gsub("(.*)\\..*", "\\1", csv_files2)  )
+
+FF_worker <- mlply(function(y) converter(y), .data=csv_files, .progress = "text")
+names(FF_worker) <- vars
+save(FF_worker, file = output_file)
+}
+converter <- function(file) {
+data <- readLines(file)
+
+data[1] <- paste0(data[1],",")
+
+index <- grep(",", data)
+new_index <- sort(unique(c(index - 1, index)))
+
+headers <- new_index[!(new_index %in% index)]
+headers1 <- headers + 1
+headers2 <- c(headers[-1] - 1,  max(new_index))
+headers_names <- headers; headers_names[1] <- 1
+
+l <- mapply(function(x, y) data[x:y], headers1, headers2, SIMPLIFY = FALSE)
+
+names <- gsub("(.*) -- .*",  "\\1" , trimws(data[headers_names]))
+names <- tolower(gsub(" ", "_", names))
+
+if(any(names == "average_market_cap")) {
+  other <- (which(names == "average_market_cap") + 1):length(headers)
+  headers[other] <- paste0(headers[other] - 5, ":", headers[other])
+
+  names <- vector()
+  for(i in seq_along(headers)) names[i] <- gsub("(.*) -- .*",  "\\1" , paste0( trimws( data[eval(parse(text = headers[i]))]),collapse = "" ))
+  names <- tolower(gsub(" ", "_", names))
+
+}
+
+if(any(names == "")){for (i in 1:length(names)){if(names[i]==""){names[i] <- paste0("Temp",i)}}}
+
+names(l) <- names
+
+datatest <- try(lapply(l[2:length(l)], function(x) na.omit(read.csv(text = x,  stringsAsFactors = FALSE, skip=0))), silent = TRUE)
+if (class(datatest) == "try-error") {
+  datatest <- lapply(l, function(x) na.omit(read.csv(text = x,  stringsAsFactors = FALSE, header = FALSE)))
+}
+datatest <- datatest[sapply(datatest, nrow) > 0]
+
+d <- vector()
+for (i in 1:length(datatest)) d[i] <- nchar(as.character(datatest[[i]]$X[1])) == 8
+for (i in 1:length(datatest)) d[i] <- nchar(as.character(datatest[[i]][1,1])) == 8
+m <- vector()
+for (i in 1:length(datatest)) m[i] <- nchar(as.character(datatest[[i]]$X[1])) == 6
+for (i in 1:length(datatest)) m[i] <- nchar(as.character(datatest[[i]][1,1])) == 6
+a <- vector()
+for (i in 1:length(datatest)) a[i] <- nchar(as.character(datatest[[i]]$X[1])) == 4
+for (i in 1:length(datatest)) a[i] <- nchar(as.character(datatest[[i]][1,1])) == 4
+
+annual  <- lapply(datatest[unlist(a)], function(x) xts::xts(as.data.frame(lapply(x[,-1,drop=FALSE],as.numeric)), order.by = as.yearmon(as.character(x[, 1]), format = "%Y")) )
+monthly <- lapply(datatest[unlist(m)], function(x) xts::xts(as.data.frame(lapply(x[,-1,drop=FALSE],as.numeric)), order.by = as.yearmon(as.character(x[, 1]), format = "%Y%m")))
+
+return(list(annual = annual, monthly = monthly))
+}
+```
+
+download the four Fama-French factors including the risk-free rate.
+```{r}
+require(quantmod)
+require(tidyquant)
+require(tidyverse)
+library(quantmod)
+require(FFdownload)
+
+# UNCOMMEND TO DOWNLOAD THE NEWEST DATA!
+FFdownload(exclude_daily=TRUE,tempdir=tempdir(),download=TRUE,download_only=TRUE)
+FF_worker(output_file = "FFdata.RData", tempdir=tempdir())
+load(file = "FFdata.RData")
+library(timetk)
+
+factors <- FF_worker$`x_F-F_Research_Data_Factors`$monthly$Temp2 %>% 
+        tk_tbl(rename_index="date") %>% # make tibble
+        mutate(date=as.Date(date, frac=1)) %>% # make proper month-end date format
+        mutate(Mkt.RF=Mkt.RF/100, RF=RF/100, HML=HML/100, SMB=SMB/100)
+        #gather(key=FFvar,value = price,-date) # gather into tidy format
+```
+
+From both datasets we select data for the last (available) 60 months, calculate returns (simple percentage) for the US-Stocks and eliminate those stocks that have NAs for this period.
+```{r}
+require(tidyquant)
+require(timetk)
+
+anyNA(sp100_daily_RI)
+sp100_daily_RI_prices <- gather(sp100_daily_RI, key = symbol, value= prices, "AMAZON.COM":"CHARTER COMMS.CL.A")
+anyNA(sp100_daily_RI_prices)
+```
+
+```{r}
+sp100_returns_RI_60_long <- sp100_daily_RI_prices %>% mutate(prices = as.numeric(prices)) %>% group_by(symbol) %>%
+ tq_transmute(select = prices,
+              mutate_fun = periodReturn, 
+              period="monthly", 
+              type="arithmetic",
+              col_rename = "Stock.returns") %>% ungroup() %>% mutate(date = as.yearmon(date))
+anyNA(sp100_returns_RI_60_long)
+
+sp100_returns_RI_60_long <- sp100_returns_RI_60_long[c(2,1,3)] %>% group_by(symbol)
+
+fama_french <- factors %>%
+   select(date, Mkt.RF, RF) %>% mutate(date = as.yearmon(date))
+```
+
+c) Now subtract the risk-free rate from all the stocks. Then estimate each stocks beta with the market: Regress all stock excess returns on the market excess return and save all betas (optimally use `mutate` and `map` in combination with `lm`). Estimate the mean-return for each stock and plot the return/beta-combinations. Create the security market line and include it in the plot! What do you find?
+
+```{r}
+library(tidyquant)
+library(tidyverse)
+library(PerformanceAnalytics)
+
+
+joined_data <- left_join(sp100_returns_RI_60_long, fama_french, by= c("date"))
+
+joined_data <- mutate(joined_data, 
+      monthly_ret_rf = Stock.returns - RF)
+
+require(xts)
+regr_fun <- function(data_xts) {
+   lm(monthly_ret_rf ~ Mkt.RF, data = as_data_frame(data_xts)) %>%
+       coef()
+}
+
+beta_alpha <- joined_data %>% 
+   tq_mutate(mutate_fun = rollapply,
+             width      = 60,
+             FUN        = regr_fun,
+             by.column  = FALSE,
+             col_rename = c("alpha", "beta"))
+
+beta_alpha
+```
+
+```{r}
+beta_alpha_filter <- filter(beta_alpha, !is.na(alpha))
+symbol_beta_alpha <- beta_alpha_filter %>%
+   select(symbol, alpha, beta)
+symbol_beta_alpha 
+```
+
+```{r}
+alpha <- beta_alpha %>%
+   select(symbol, alpha)
+```
+
+```{r}
+beta <- beta_alpha_filter %>%
+   select(symbol, beta)
+beta
+```
+
+```{r}
+library(dplyr)
+means_sp100_RI_60 <- joined_data %>%
+   group_by(symbol) %>%
+   summarize(mu = mean(monthly_ret_rf, na.rm=TRUE))
+means_sp100_RI_60
+```
+
+```{r}
+mu.hat <- mutate(beta_alpha, 
+      mu_capm = beta * mean(Mkt.RF))
+
+mu.hat <- filter(mu.hat, !is.na(alpha))
+mu.hat <- mu.hat  %>%
+   select(symbol, alpha, beta, mu_capm)
+
+mu.hat <- left_join(mu.hat, means_sp100_RI_60, by = "symbol")
+
+sml.fit <- lm(mu_capm~beta, mu.hat)
+
+install.packages("plotly")
+library(plotly)
+
+p <- plot_ly(mu.hat, x = ~beta, y = ~mu_capm, type = 'scatter', mode = 'line', text = ~paste('symbol:', symbol)) %>%
+   add_markers(x = ~beta, y = ~mu)
+
+p
+```
+
+d) In a next step (following both documents), we sort the stocks according to their beta and build ten value-weighted portfolios (with more or less the same number of stocks). Repeat a) for the ten portfolios. What do you observe?
+
+```{r}
+sp100_monthly_MV <- read_excel("sp100 monthly MV.xlsx")
+head(sp100_monthly_MV, n=10)
+
+anyNA(sp100_monthly_MV)
+sp100_monthly_MV <- gather(sp100_monthly_MV, key = symbol, value= value, "AMAZON.COM":"CHARTER COMMS.CL.A")
+anyNA(sp100_daily_RI_prices)
+```
+mean value
+```{r}
+mean_sp100_MV <- sp100_monthly_MV %>% 
+   group_by(symbol) %>%
+   summarize(mean_value = mean(value, na.rm=TRUE))
+```
+
+```{r}
+symbol_beta_alpha_value <- left_join(mean_sp100_MV, beta,  by= "symbol")
+```
+
+```{r}
+symbol_beta_alpha_value <- arrange(symbol_beta_alpha_value, beta)
+symbol_beta_alpha_value
+```
+
+create weights
+```{r}
+Portfolio1 <- symbol_beta_alpha_value[1:10,]
+sum_weights1 <- sum(Portfolio1$mean_value)
+weight_portfolio1 <- Portfolio1$mean_value/sum_weights1
+
+Portfolio2 <- symbol_beta_alpha_value[11:20,]
+sum_weights2 <- sum(Portfolio2$mean_value)
+weight_portfolio2 <- Portfolio2$mean_value/sum_weights2
+
+Portfolio3 <- symbol_beta_alpha_value[21:30,]
+sum_weights3 <- sum(Portfolio3$mean_value)
+weight_portfolio3 <- Portfolio3$mean_value/sum_weights3
+
+Portfolio4 <- symbol_beta_alpha_value[31:40,]
+sum_weights4 <- sum(Portfolio4$mean_value)
+weight_portfolio4 <- Portfolio4$mean_value/sum_weights4
+
+Portfolio5 <- symbol_beta_alpha_value[41:50,]
+sum_weights5 <- sum(Portfolio5$mean_value)
+weight_portfolio5 <- Portfolio5$mean_value/sum_weights5
+
+Portfolio6 <- symbol_beta_alpha_value[51:60,]
+sum_weights6 <- sum(Portfolio6$mean_value)
+weight_portfolio6 <- Portfolio6$mean_value/sum_weights6
+
+Portfolio7 <- symbol_beta_alpha_value[61:70,]
+sum_weights7 <- sum(Portfolio7$mean_value)
+weight_portfolio7 <- Portfolio7$mean_value/sum_weights7
+
+Portfolio8 <- symbol_beta_alpha_value[71:80,]
+sum_weights8 <- sum(Portfolio8$mean_value)
+weight_portfolio8 <- Portfolio8$mean_value/sum_weights8
+
+Portfolio9 <- symbol_beta_alpha_value[81:90,]
+sum_weights9 <- sum(Portfolio9$mean_value)
+weight_portfolio9 <- Portfolio9$mean_value/sum_weights9
+
+Portfolio10 <- symbol_beta_alpha_value[91:nrow(symbol_beta_alpha_value),]
+sum_weights10 <- sum(Portfolio10$mean_value)
+weight_portfolio10 <- Portfolio10$mean_value/sum_weights10
+```
+
+
+returns Portfolio
+```{r}
+sp100_returns_RI_60_wide <- sp100_returns_RI_60_long %>% spread(symbol, Stock.returns)
+
+portfolio1_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio1$symbol)]
+portfolio1_returns_long <- gather(portfolio1_returns_wide, key = symbol, value= returns, c(Portfolio1$symbol))
+portfolio1_returns<- portfolio1_returns_long %>%
+ tq_portfolio(assets_col = symbol,
+              returns_col = returns,
+              weights = weight_portfolio1,
+              col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 1")
+
+portfolio2_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio2$symbol)]
+portfolio2_returns_long <- gather(portfolio2_returns_wide, key = symbol, value= returns, c(Portfolio2$symbol))
+portfolio2_returns<- portfolio2_returns_long %>%
+ tq_portfolio(assets_col = symbol,
+              returns_col = returns,
+              weights = weight_portfolio2,
+              col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 2")
+
+portfolio3_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio3$symbol)]
+portfolio3_returns_long <- gather(portfolio3_returns_wide, key = symbol, value= returns, c(Portfolio3$symbol))
+portfolio3_returns<- portfolio3_returns_long %>%
+ tq_portfolio(assets_col = symbol,
+              returns_col = returns,
+              weights = weight_portfolio3,
+              col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 3")
+
+portfolio4_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio4$symbol)]
+portfolio4_returns_long <- gather(portfolio4_returns_wide, key = symbol, value= returns, c(Portfolio4$symbol))
+portfolio4_returns<- portfolio4_returns_long %>%
+ tq_portfolio(assets_col = symbol,
+              returns_col = returns,
+              weights = weight_portfolio4,
+              col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 4")
+
+portfolio5_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio5$symbol)]
+portfolio5_returns_long <- gather(portfolio5_returns_wide, key = symbol, value= returns, c(Portfolio5$symbol))
+portfolio5_returns<- portfolio5_returns_long %>%
+ tq_portfolio(assets_col = symbol,
+              returns_col = returns,
+              weights = weight_portfolio5,
+              col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 5")
+
+portfolio6_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio6$symbol)]
+portfolio6_returns_long <- gather(portfolio6_returns_wide, key = symbol, value= returns, c(Portfolio6$symbol))
+portfolio6_returns<- portfolio6_returns_long %>%
+ tq_portfolio(assets_col = symbol,
+              returns_col = returns,
+              weights = weight_portfolio6,
+              col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 6")
+
+portfolio7_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio7$symbol)]
+portfolio7_returns_long <- gather(portfolio7_returns_wide, key = symbol, value= returns, c(Portfolio7$symbol))
+portfolio7_returns<- portfolio7_returns_long %>%
+ tq_portfolio(assets_col = symbol,
+              returns_col = returns,
+              weights = weight_portfolio7,
+              col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 7")
+
+portfolio8_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio8$symbol)]
+portfolio8_returns_long <- gather(portfolio8_returns_wide, key = symbol, value= returns, c(Portfolio8$symbol))
+portfolio8_returns<- portfolio8_returns_long %>%
+ tq_portfolio(assets_col = symbol,
+              returns_col = returns,
+              weights = weight_portfolio8,
+              col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 8")
+
+portfolio9_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio9$symbol)]
+portfolio9_returns_long <- gather(portfolio9_returns_wide, key = symbol, value= returns, c(Portfolio9$symbol))
+portfolio9_returns<- portfolio9_returns_long %>%
+ tq_portfolio(assets_col = symbol,
+              returns_col = returns,
+              weights = weight_portfolio9,
+              col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 9")
+
+portfolio10_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio10$symbol)]
+portfolio10_returns_long <- gather(portfolio10_returns_wide, key = symbol, value= returns, c(Portfolio10$symbol))
+portfolio10_returns<- portfolio10_returns_long %>%
+ tq_portfolio(assets_col = symbol,
+              returns_col = returns,
+              weights = weight_portfolio10,
+              col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 10")
+
+allportfolio_returns <- rbind(portfolio1_returns, portfolio2_returns, portfolio3_returns, portfolio4_returns, portfolio5_returns, portfolio6_returns, portfolio7_returns, portfolio8_returns, portfolio9_returns, portfolio10_returns)
+
+allportfolio_returns <- allportfolio_returns %>% group_by(Portfolio)
+allportfolio_returns
+```
+
+```{r}
+joined_data_portfolio <- left_join(allportfolio_returns, fama_french, by= c("date"))
+
+joined_data_portfolio <- mutate(joined_data_portfolio, 
+      monthly_ret_rf = Portfolio.returns - RF)
+
+require(xts)
+regr_fun_portfolio <- function(data_xts) {
+   lm(monthly_ret_rf ~ Mkt.RF, data = as_data_frame(data_xts)) %>%
+       coef()
+}
+
+beta_alpha_portfolio <- joined_data_portfolio %>% 
+   tq_mutate(mutate_fun = rollapply,
+             width      = 60,
+             FUN        = regr_fun_portfolio,
+             by.column  = FALSE,
+             col_rename = c("alpha", "beta"))
+beta_alpha_portfolio
+```
+
+
+```{r}
+beta_alpha_portfolio_filter <- filter(beta_alpha_portfolio, !is.na(alpha))
+symbol_beta_alpha_portfolio <- beta_alpha_portfolio_filter %>%
+   select(Portfolio, alpha, beta)
+symbol_beta_alpha_portfolio
+```
+
+```{r}
+alpha_portfolio <- beta_alpha_portfolio %>%
+   select(Portfolio, alpha)
+```
+
+
+```{r}
+beta_portfolio <- beta_alpha_portfolio %>%
+   select(Portfolio, beta)
+```
+
+```{r}
+means_Portfolio <- joined_data_portfolio %>%
+   group_by(Portfolio) %>%
+   summarize(mu = mean(monthly_ret_rf, na.rm=TRUE))
+means_Portfolio
+```
+
+```{r}
+return_beta_portfolio <- left_join(means_Portfolio, beta_portfolio, by="Portfolio")
+
+mu.hat_portfolio <- mutate(beta_alpha_portfolio, 
+      mu_capm_portfolio = beta * mean(Mkt.RF))
+
+mu.hat_portfolio <- filter(mu.hat_portfolio, !is.na(alpha))
+mu.hat_portfolio <- mu.hat_portfolio  %>%
+   select(Portfolio, alpha, beta, mu_capm_portfolio)
+
+mu.hat_portfolio <- left_join(mu.hat_portfolio, means_Portfolio, by = "Portfolio")
+
+sml.fit_portfolio <- lm(mu_capm_portfolio~beta, mu.hat_portfolio)
+
+library(plotly)
+
+p_portfolio <- plot_ly(mu.hat_portfolio, x = ~beta, y = ~mu_capm_portfolio, type = 'scatter', mode = 'line', text = ~paste('Portfolio:', Portfolio)) %>%
+   add_markers(x = ~beta, y = ~mu)
+
+p_portfolio
+```
+
+e) In the third step you follow page 6-8 of the second document and estimate the second-pass regression with the market and then market & idiosyncratic risk. What do you observe? Present all your results in a similar fashion as in the document.
+
+```{r}
+require(xts)
+regr_fun_residuals <- function(data_xts) {
+   data_xts <- lm(monthly_ret_rf ~ Mkt.RF, data = as_data_frame(data_xts))
+R <- summary(data_xts)$sigma^2
+return(R)
+}
+
+residuals <- joined_data %>% 
+   tq_mutate(mutate_fun = rollapply,
+             width      = 60,
+             FUN        = regr_fun_residuals,
+             by.column  = FALSE,
+             col_rename = c("Residuals"))
+
+residuals_only <- filter(residuals, !is.na(Residuals))
+symbol_residuals <- residuals_only %>%
+   select(symbol, Residuals)
+
+mean_MKt.RF <- joined_data %>%
+   group_by(symbol) %>%
+   summarize(mu_MKt_RF = mean(Mkt.RF, na.rm=TRUE))
+
+first <- left_join(symbol_beta_alpha, symbol_residuals, by = "symbol" )
+
+second <- left_join(mean_MKt.RF, means_sp100_RI_60,  by = "symbol" )
+
+all_inputs <- left_join(first, second,  by = "symbol" )
+
+second_pass_regression <- lm(mu~ beta + Residuals, all_inputs)
+
+summary(second_pass_regression)
+```
+
+```{r}
+p
+```
+
+
+```{r}
+require(xts)
+regr_fun_residuals <- function(data_xts) {
+   data_xts <- lm(monthly_ret_rf ~ Mkt.RF, data = as_data_frame(data_xts))
+R <- summary(data_xts)$sigma^2
+return(R)
+}
+
+residuals_portfolio <- joined_data_portfolio %>% 
+   tq_mutate(mutate_fun = rollapply,
+             width      = 60,
+             FUN        = regr_fun_residuals,
+             by.column  = FALSE,
+             col_rename = c("Residuals"))
+
+residuals_only_portfolio <- filter(residuals_portfolio, !is.na(Residuals))
+symbol_residuals_portfolio <- residuals_only_portfolio %>%
+   select(Portfolio, Residuals)
+
+mean_MKt.RF_portfolio <- joined_data_portfolio %>%
+   group_by(Portfolio) %>%
+   summarize(mu_MKt_RF = mean(Mkt.RF, na.rm=TRUE))
+
+first_portfolio <- left_join(symbol_beta_alpha_portfolio, symbol_residuals_portfolio, by = "Portfolio" )
+
+second_portfolio <- left_join(mean_MKt.RF_portfolio, means_Portfolio,  by = "Portfolio" )
+
+all_inputs_portfolio <- left_join(first_portfolio, second_portfolio,  by = "Portfolio" )
+
+second_pass_regression_portfolio <- lm(mu~ beta + Residuals, all_inputs_portfolio)
+
+summary(second_pass_regression_portfolio)
+```
+
+```{r}
+p_portfolio
+```
+
+  
 
 ## Exercise 3: Calculating and checking the CAPM cont.
 
@@ -39,7 +970,247 @@ As we have seen: the CAPM for small portfolios does not work very well, and so w
 Go to Kenneth French's Homepage  again and download the following datasets: "Portfolios Formed on Market Beta" (where we will use 10 monthly value weighted portfolios formed on beta) and "25 Portfolios Formed on Size and Market Beta" (same thing) as well as the market factor and rf (as before). Now we are going to check the CAPM like famous researchers have done it!
 We can use returns as they are in the files (simple returns)!
 
+```{r}
+
+#Download the Portfolios from Kenneth French's Homepage
+portf_mkt_beta <- "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Portfolios_Formed_on_BETA_CSV.zip"
+ portf_mkt_beta_csv <- "Portfolios_Formed_on_BETA.csv"
+ temp <- tempfile()
+download.file(portf_mkt_beta, temp, quiet = TRUE)
+portf_mkt_beta <- read_csv(unz(temp, portf_mkt_beta_csv), skip = 15, quote = "\",") %>%
+  dplyr::rename(date = "X1") %>%
+  mutate_at(vars(-date), as.numeric) %>%
+  mutate(date = rollback(ymd(parse_date_time(date, "%Y%m") + months(1))))%>%
+  filter(date >= first('1964-01-01') & date <= '2018-12-31')
+
+#Download the market factor and rf (Fama/French 3 Research Factors)
+mkt_factors <- "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_Factors_CSV.zip"
+ mkt_factors_csv <- "F-F_Research_Data_Factors.CSV"
+ temp <- tempfile()
+download.file(mkt_factors, temp, quiet = TRUE)
+mkt_factors <- read_csv(unz(temp, mkt_factors_csv), skip = 3, quote = "\",") %>%
+  dplyr::rename(date = X1) %>%
+  mutate_at(vars(-date), as.numeric) %>%
+  mutate(date = rollback(ymd(parse_date_time(date, "%Y%m") + months(1)))) %>%
+  filter(date >= first('1964-01-01') & date <= '2018-12-31')
+
+```
+
 a)	Subtract the risk-free rate from the first set of 10 portfolios (only sorted on beta) (Lo 10,., Hi 10) and estimate each stocks beta with the market. Estimate the mean-return for each stock and plot the return/beta-combinations. Create the security market line and include it in the plot! What do you find? (You can split the file in 2-3 different time blocks and see if something changes). * Now we are done with the first-pass regression.*
+
+```{r}
+
+#join data, substract Risk-Free-Rate
+ten_portf <- portf_mkt_beta[1:660, -c(2:6)]
+ten_portf_joined <- left_join(mkt_factors, ten_portf)
+ten_portf_joined <- ten_portf_joined <- ten_portf_joined%>% dplyr::rename("Lo10" = "Lo 10") %>% dplyr::rename("Dec2" = "Dec 2") %>% dplyr::rename("Dec3" = "Dec 3") %>% dplyr::rename("Dec4" = "Dec 4") %>% dplyr::rename("Dec5" = "Dec 5") %>% dplyr::rename("Dec6" = "Dec 6") %>% dplyr::rename("Dec7" = "Dec 7") %>% dplyr::rename("Dec8" = "Dec 8") %>% dplyr::rename("Dec9" = "Dec 9") %>% dplyr::rename("Hi10" = "Hi 10")
+ten_portf_rf <- mutate(ten_portf_joined, Lo10rf = Lo10 - RF, Dec2rf = Dec2 - RF, Dec3rf = Dec3 - RF, Dec4rf = Dec4 - RF, Dec5rf = Dec5 -RF, Dec6rf = Dec6 - RF, Dec7rf = Dec7 - RF, Dec8rf = Dec8 - RF, De9rf = Dec9 - RF, Hi10rf = Hi10 - RF)
+ten_portf_rf <- ten_portf_rf[-2:-15]
+
+#Create XTS
+mkt_factors_xts <- tk_xts(data = mkt_factors, date_var = date)
+ten_portf_rf_xts <- ten_portf_rf %>%
+  tk_xts(date_var = date, silent = TRUE)
+
+#Calculate Betas for each portfolio
+betas_ten_portf_lm <- lm(ten_portf_rf_xts ~ mkt_factors_xts[, 1])
+betas_ten_portf_lm
+betas_ten_portf <- CAPM.beta(Ra = ten_portf_rf_xts, Rb = mkt_factors_xts[, 1], Rf = 0)
+betas_ten_portf
+
+```
+
+```{r}
+
+#Estimate Mean Return
+mean_ten_portf_rf_xts <- lapply(ten_portf_rf_xts, FUN=mean)
+mean_ten_portf_rf_xts <- as.data.frame(mean_ten_portf_rf_xts)
+
+#Plot the return/beta-combinations
+plot.default(x = betas_ten_portf, xlim=c(0, 2),
+             y = mean_ten_portf_rf_xts, ylim=c(0, 1),
+             xlab = "Beta", ylab = "Mean Return",
+             main = "Return/Beta-combinations")
+
+```
+
+```{r}
+
+mean_mkt <- lapply(mkt_factors_xts[, 1], FUN=mean)
+mean_mkt <- as.data.frame(mean_mkt)
+y_mkt <- mean_mkt[1, 1]
+plot.default(x = betas_ten_portf, xlim=c(0, 2),
+             y = mean_ten_portf_rf_xts, ylim=c(0, 1),
+             xlab = "Beta", ylab = "Mean Return",
+             main = "Return/Beta-combinations",
+             abline(0, y_mkt))
+
+plot.default(x = betas_ten_portf, xlim=c(0, 2), 
+             y = mean_ten_portf_rf_xts, ylim=c(0, 10), 
+             xlab = "Beta", ylab = "Mean Return",
+             main = "Return/Beta-combinations",
+             abline(0, y_mkt))
+
+
+#summary
+summary_CAPM_ten_portf <- (table.CAPM(Ra = ten_portf_rf_xts, Rb = mkt_factors_xts[, 1], Rf = 0)[1:9, ])
+
+
+```
+
+```{r}
+
+#look for first 10 years
+ten_portf_rf_10yrs_xts <- ten_portf_rf[1:120, ] %>%
+  tk_xts(date_var = date, silent = TRUE)
+betas_ten_portf_rf_10yrs <- CAPM.beta(Ra = ten_portf_rf_10yrs_xts, Rb = mkt_factors_xts[1:120, 1], Rf = 0)
+mean_ten_portf_rf_10yrs_xts <- lapply(ten_portf_rf_10yrs_xts, FUN=mean)
+mean_ten_portf_rf_10yrs_xts <- as.data.frame(mean_ten_portf_rf_10yrs_xts)
+mean_mkt_10yrs <- lapply(mkt_factors_xts[1:120, 1], FUN=mean)
+mean_mkt_10yrs <- as.data.frame(mean_mkt_10yrs)
+y_mkt_10yrs <- mean_mkt_10yrs[1, 1]
+plot.default(x = betas_ten_portf_rf_10yrs, xlim=c(0, 2),
+             y = mean_ten_portf_rf_10yrs_xts, ylim=c(0, 1),
+             xlab = "Beta", ylab = "Mean Return",
+             main = "Return/Beta-combinations 1964-1974",
+             abline(0, y_mkt_10yrs))
+summary_CAPM_ten_portf_10yrs <- (table.CAPM(Ra = ten_portf_rf_xts[1:120, ], Rb = mkt_factors_xts[1:120, 1], Rf = 0)[1:9, ])
+summary_CAPM_ten_portf_10yrs
+
+#look for 2000-2018
+ten_portf_rf_2000_xts <- ten_portf_rf[433:660, ] %>%
+  tk_xts(date_var = date, silent = TRUE)
+betas_ten_portf_rf_2000 <- CAPM.beta(Ra = ten_portf_rf_2000_xts, Rb = mkt_factors_xts[433:660, 1], Rf = 0)
+mean_ten_portf_rf_2000_xts <- lapply(ten_portf_rf_2000_xts, FUN=mean)
+mean_ten_portf_rf_2000_xts <- as.data.frame(mean_ten_portf_rf_2000_xts)
+mean_mkt_2000 <- lapply(mkt_factors_xts[433:660, 1], FUN=mean)
+mean_mkt_2000 <- as.data.frame(mean_mkt_2000)
+y_mkt_2000 <- mean_mkt_2000[1, 1]
+plot.default(x = betas_ten_portf_rf_2000, xlim=c(0, 2),
+             y = mean_ten_portf_rf_2000_xts, ylim=c(0, 1),
+             xlab = "Beta", ylab = "Mean Return",
+             main = "Return/Beta-combinations 2000-2018",
+             abline(0, y_mkt_2000))
+summary_CAPM_ten_portf_2000 <- (table.CAPM(Ra = ten_portf_rf_xts[433:660, ], Rb = mkt_factors_xts[433:660, 1], Rf = 0)[1:9, ])
+summary_CAPM_ten_portf_2000
+
+plot.default(x = betas_ten_portf, xlim=c(0, 2),
+             y = mean_ten_portf_rf_xts, ylim=c(0, 1),
+             xlab = "Beta", ylab = "Mean Return",
+             main = "Return/Beta-combinations 1964-2018",
+             abline(0, y_mkt))
+
+
+
+```
+
+
 b)	In the second-pass regression we now regress the average stock returns on the betas estimated before. What do you find in the coefficients and does this contradict the CAPM? Try different time periods again and see what you find. (all of the interpretations are in BKM pp.416f). 
+
+
+
+
+
+
 c)	Now do the extended second pass regression (regress on betas and residual-sds that you can extract from the regression) and see what you find for different periods. Interpret according to concept check 13.2. One of the (many) problems of the CAPM can be the correlation between residual variances and betas. Calculate and interpret.
+
+```{r}
+
+#Look at a) -> We now do it with the mean return of every portfolio combined... 
+
+#1964-2018
+com_mean_ten_portf_rf <- sum(mean_ten_portf_rf_xts)/10
+mean_betas_ten_portf <- sum(betas_ten_portf)/10
+plot.default(x = mean_betas_ten_portf, xlim=c(0, 2),
+             y = com_mean_ten_portf_rf, ylim=c(0, 2),
+             xlab = "Beta", ylab = "Mean Return",
+             main = "Return/Beta-combinations 10 Portfolios 1964-2018",
+             abline(0, y_mkt))
+
+#1964-1974
+com_mean_ten_portf_rf_10yrs <- sum(mean_ten_portf_rf_10yrs_xts)/10
+mean_betas_ten_portf_10yrs <- sum(betas_ten_portf_rf_10yrs)/10
+plot.default(x = mean_betas_ten_portf_10yrs, xlim=c(0, 2),
+             y = com_mean_ten_portf_rf_10yrs, ylim=c(0, 2),
+             xlab = "Beta", ylab = "Mean Return",
+             main = "Return/Beta-combinations 10 Portfolios 1964-1974",
+             abline(0, y_mkt_10yrs))
+
+#2000-2018
+com_mean_ten_portf_rf_2000 <- sum(mean_ten_portf_rf_2000_xts)/10
+mean_betas_ten_portf_2000 <- sum(betas_ten_portf_rf_2000)/10
+plot.default(x = mean_betas_ten_portf_2000, xlim=c(0, 2),
+             y = com_mean_ten_portf_rf_2000, ylim=c(0, 2),
+             xlab = "Beta", ylab = "Mean Return",
+             main = "Return/Beta-combinations 10 Portfolios 2000-2018",
+             abline(0, y_mkt_2000))
+
+#SML-Function
+calc_residual <- function(x) {y <- y_mkt*x}
+calc_residual_10yrs <- function(x) {y <- y_mkt_10yrs*x}
+calc_residual_2000 <- function(x) {y <- y_mkt_2000*x}
+residual_1964_2018 <- as.data.frame((com_mean_ten_portf_rf - calc_residual(mean_betas_ten_portf))^2)
+residual_1964_1974 <- as.data.frame((com_mean_ten_portf_rf_10yrs - calc_residual_10yrs(mean_betas_ten_portf_10yrs))^2)
+residual_2000_2018 <- as.data.frame((com_mean_ten_portf_rf_2000 - calc_residual_2000(mean_betas_ten_portf_2000))^2)
+joined_residuals <- merge(residual_1964_2018[1, 1], residual_1964_1974[1, 1])
+joined_residuals <- merge(joined_residuals, residual_2000_2018)
+Residuals_different_timeperiods <- joined_residuals %>% 
+  dplyr::rename("Residual 2000-2018" = "(com_mean_ten_portf_rf_2000 - calc_residual_2000(mean_betas_ten_portf_2000))^2") %>% dplyr::rename("Residual 1964-2008" = "x") %>% dplyr::rename("Residual 1964-1974" = "y")
+Residuals_different_timeperiods
+
+
+```
+
+
+
 d)	Try again with 25 portfolios sorted on size and beta. What do you find? Is that interesting? 
+
+```{r}
+
+#join data, substract Risk-Free-Rate
+twentyfive_portf <- portf_mkt_beta[1:660, -c(7:16)]
+twentyfive_portf_joined <- left_join(mkt_factors, twentyfive_portf)
+twentyfive_portf_joined <- twentyfive_portf_joined <- twentyfive_portf_joined%>%
+  dplyr::rename("Lo20" = "Lo 20") %>%
+  dplyr::rename("Qnt2" = "Qnt 2") %>%
+  dplyr::rename("Qnt3" = "Qnt 3") %>%
+  dplyr::rename("Qnt4" = "Qnt 4") %>%
+  dplyr::rename("Hi20" = "Hi 20")
+twentyfive_portf_rf <- mutate(twentyfive_portf_joined, Lo20rf = Lo20 - RF, Qnt2rf = Qnt2 - RF, Qnt3rf = Qnt3 - RF, Qnt4rf = Qnt4 - RF, Hi20rf = Hi20 - RF)
+twentyfive_portf_rf <- twentyfive_portf_rf[-2:-10]
+
+#Create XTS
+twentyfive_portf_rf_xts <- twentyfive_portf_rf %>%
+  tk_xts(date_var = date, silent = TRUE)
+
+#Calculate Betas for each portfolio
+betas_twentyfive_portf <- CAPM.beta(Ra = twentyfive_portf_rf_xts, Rb = mkt_factors_xts[, 1], Rf = 0)
+
+#Estimate Mean Return
+mean_twentyfive_portf_rf_xts <- lapply(twentyfive_portf_rf_xts, FUN=mean)
+mean_twentyfive_portf_rf_xts <- as.data.frame(mean_twentyfive_portf_rf_xts)
+
+#Plot the return/beta-combinations
+plot.default(x = betas_twentyfive_portf, xlim=c(0, 2),
+             y = mean_twentyfive_portf_rf_xts, ylim=c(0, 1),
+             xlab = "Beta", ylab = "Mean Return",
+             main = "Return/Beta-combinations 25",
+             abline(0, y_mkt))
+
+#We now do it with the mean return of every portfolio combined...
+com_mean_twentyfive_portf_rf <- sum(mean_twentyfive_portf_rf_xts)/5
+# and the beta
+mean_betas_twentyfive_portf <- sum(betas_twentyfive_portf)/5
+
+plot.default(x = mean_betas_ten_portf, xlim=c(0, 2),
+             y = com_mean_ten_portf_rf, ylim=c(0, 1),
+             xlab = "Beta", ylab = "Mean Return",
+             main = "Return/Beta-combinations Portfolio Summary 25",
+             abline(0, y_mkt))
+
+plot.default(x = mean_betas_ten_portf, xlim=c(0, 2),
+             y = com_mean_ten_portf_rf, ylim=c(0, 1),
+             xlab = "Beta", ylab = "Mean Return",
+             main = "Return/Beta-combinations Portfolio Summary 10",
+             abline(0, y_mkt))
+```
