@@ -1,7 +1,7 @@
 ---
 title: "Portfoliomanagement and Financial Analysis - Assignment 5"
 subtitle: "Submit until Monday 2019-10-29, 13:00"
-author: "Kontostavlos, Christina"
+author: "Kontostavlos-P., Christina"
 output: html_notebook
 ---
   
