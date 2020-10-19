@@ -101,7 +101,7 @@ chart.Weights(bt_gmv)
 returns_gmv <- Return.portfolio(R = R, weights = extractWeights(bt_gmv))
 ```
 
-###second we use a long-only constraint
+###Second we use a long-only constraint
 
 ```{r}
 # Add long only constraints to a new portfolio to show the difference
@@ -257,16 +257,90 @@ In this exercise we want to estimate the CAPM. Please read carefully through the
   
 a) From Datastream get the last 10 years of data from the 100 stocks of the S&P100 using the list `LS&P100I` (S&P 100): total return index (RI) and market cap (MV)
 
-```{r Getting the data from Thomson Reuter}
-sp100 <- read_excel("sp100_monthly.xlsx",sheet = "Sheet1")
-colnames(sp100)[1]  <- "date"
+```{r}
+ library(readxl)
+ sp100_daily_RI <- read_excel("sp100 daily RI_2.xlsx")
+ head(sp100_daily_RI, n=10)
 ```
 
+ b) Further import the Fama-French-Factors from Kenneth Frenchs homepage (monthly, e.g. using `FFdownload`). From both datasets we select data for the last (available) 60 months, calculate returns (simple percentage) for the US-Stocks and eliminate those stocks that have NAs for this period.
 
+```{r}
+ # FF_worker because the sstoeckl/FFdownload had an issue in the converter (daily,..)
+ FF_worker <- function(output_file = "data.Rdata", tempdir=NULL) {
 
-__It is false for both data.frames so therefore there are no NA's in our data.frames.__
+ csv_files <- list.files(tempdir, full.names = TRUE, pattern = "\\.csv$", ignore.case = TRUE) # full path
+ csv_files2 <- list.files(tempdir, full.names = FALSE, pattern = "\\.csv$", ignore.case = TRUE) # only filenames
 
-b) Further import the Fama-French-Factors from Kenneth Frenchs homepage (monthly, e.g. using `FFdownload`). From both datasets we select data for the last (available) 60 months, calculate returns (simple percentage) for the US-Stocks and eliminate those stocks that have NAs for this period.
+ vars <- paste0("x_", gsub("(.*)\\..*", "\\1", csv_files2)  )
+
+ FF_worker <- mlply(function(y) converter(y), .data=csv_files, .progress = "text")
+ names(FF_worker) <- vars
+ save(FF_worker, file = output_file)
+ }
+ converter <- function(file) {
+ data <- readLines(file)
+
+ data[1] <- paste0(data[1],",")
+
+ index <- grep(",", data)
+ new_index <- sort(unique(c(index - 1, index)))
+
+ headers <- new_index[!(new_index %in% index)]
+ headers1 <- headers + 1
+ headers2 <- c(headers[-1] - 1,  max(new_index))
+ headers_names <- headers; headers_names[1] <- 1
+
+ l <- mapply(function(x, y) data[x:y], headers1, headers2, SIMPLIFY = FALSE)
+
+ names <- gsub("(.*) -- .*",  "\\1" , trimws(data[headers_names]))
+ names <- tolower(gsub(" ", "_", names))
+
+ if(any(names == "average_market_cap")) {
+   other <- (which(names == "average_market_cap") + 1):length(headers)
+   headers[other] <- paste0(headers[other] - 5, ":", headers[other])
+
+   names <- vector()
+   for(i in seq_along(headers)) names[i] <- gsub("(.*) -- .*",  "\\1" , paste0( trimws( data[eval(parse(text = headers[i]))]),collapse = "" ))
+   names <- tolower(gsub(" ", "_", names))
+
+ }
+
+ if(any(names == "")){for (i in 1:length(names)){if(names[i]==""){names[i] <- paste0("Temp",i)}}}
+
+ names(l) <- names
+
+ datatest <- try(lapply(l[2:length(l)], function(x) na.omit(read.csv(text = x,  stringsAsFactors = FALSE, skip=0))), silent = TRUE)
+ if (class(datatest) == "try-error") {
+   datatest <- lapply(l, function(x) na.omit(read.csv(text = x,  stringsAsFactors = FALSE, header = FALSE)))
+ }
+ datatest <- datatest[sapply(datatest, nrow) > 0]
+
+ d <- vector()
+ for (i in 1:length(datatest)) d[i] <- nchar(as.character(datatest[[i]]$X[1])) == 8
+ for (i in 1:length(datatest)) d[i] <- nchar(as.character(datatest[[i]][1,1])) == 8
+ m <- vector()
+ for (i in 1:length(datatest)) m[i] <- nchar(as.character(datatest[[i]]$X[1])) == 6
+ for (i in 1:length(datatest)) m[i] <- nchar(as.character(datatest[[i]][1,1])) == 6
+ a <- vector()
+ for (i in 1:length(datatest)) a[i] <- nchar(as.character(datatest[[i]]$X[1])) == 4
+ for (i in 1:length(datatest)) a[i] <- nchar(as.character(datatest[[i]][1,1])) == 4
+
+ annual  <- lapply(datatest[unlist(a)], function(x) xts::xts(as.data.frame(lapply(x[,-1,drop=FALSE],as.numeric)), order.by = as.yearmon(as.character(x[, 1]), format = "%Y")) )
+ monthly <- lapply(datatest[unlist(m)], function(x) xts::xts(as.data.frame(lapply(x[,-1,drop=FALSE],as.numeric)), order.by = as.yearmon(as.character(x[, 1]), format = "%Y%m")))
+
+ return(list(annual = annual, monthly = monthly))
+ }
+```
+
+Download the four Fama-French factors including the risk-free rate.
+```{r}
+ require(quantmod)
+ require(tidyquant)
+ require(tidyverse)
+ library(quantmod)
+ require(FFdownload)
+```
 
 ```{r Getting the Fama-French-Factors}
 tempf <- tempfile(fileext = ".RData"); tempd <- tempdir(); temptxt <- tempfile(fileext = ".txt")
@@ -281,133 +355,424 @@ ff<-FFdownload$x_Developed_ex_US_3_Factors$monthly$Temp2
 ff<-ff["2015/2020"]
 sff<-timetk::tk_tbl(ff)
 colnames(sff)[1]<-"date"
-sff$RF <- sff$RF *100
-sff
+
+factors <- sff %>% 
+         tk_tbl(rename_index="date") %>% # make tibble
+         mutate(date=as.Date(date, frac=1)) %>% # make proper month-end date format
+         mutate(Mkt.RF=Mkt.RF/100, RF=RF/100, HML=HML/100, SMB=SMB/100)
+         #gather(key=FFvar,value = price,-date) # gather into tidy format
+ 
+
 ```
 
-```{r Selecting data for the last 60 months so the last five years}
-fil_sp100 <- dplyr::filter(sp100, date >= as.Date("2015-10-01"), date <= as.Date("2020-10-01"))
+From both datasets we select data for the last (available) 60 months, calculate returns (simple percentage) for the US-Stocks and eliminate those stocks that have NAs for this period.
+```{r}
+ require(tidyquant)
+ require(timetk)
+
+ anyNA(sp100_daily_RI)
+ sp100_daily_RI_prices <- gather(sp100_daily_RI, key = symbol, value= prices, "AMAZON.COM":"CHARTER COMMS.CL.A")
+ anyNA(sp100_daily_RI_prices)
 ```
 
-```{r Transforming the dates}
-sp100_date <-as.yearmon(fil_sp100$date)
-sp100 <- base::cbind(sp100_date, fil_sp100)
-sp100$date <- NULL
-colnames(sp100)[1] <- "date"
+```{r}
+ sp100_returns_RI_60_long <- sp100_daily_RI_prices %>% mutate(prices = as.numeric(prices)) %>% group_by(symbol) %>%
+  tq_transmute(select = prices,
+               mutate_fun = periodReturn, 
+               period="monthly", 
+               type="arithmetic",
+               col_rename = "Stock.returns") %>% ungroup() %>% mutate(date = as.yearmon(date))
+ anyNA(sp100_returns_RI_60_long)
+
+ sp100_returns_RI_60_long <- sp100_returns_RI_60_long[c(2,1,3)] %>% group_by(symbol)
+
+ fama_french <- factors %>%
+    select(date, Mkt.RF, RF) %>% mutate(date = as.yearmon(date))
 ```
 
-```{r Splitting the SP100 RI from the MV}
-sp100_RI <- sp100 %>%
-  dplyr:: select(grep("date", names(sp100)), grep("TOT RETURN IND", names(sp100)))
-sp100_MV <- sp100 %>%
-  dplyr:: select(grep("date", names(sp100)), grep("MARKET VALUE", names(sp100)))
+ c) Now subtract the risk-free rate from all the stocks. Then estimate each stocks beta with the market: Regress all stock excess returns on the market excess return and save all betas (optimally use `mutate` and `map` in combination with `lm`). Estimate the mean-return for each stock and plot the return/beta-combinations. Create the security market line and include it in the plot! What do you find?
+
+```{r}
+ library(tidyquant)
+ library(tidyverse)
+ library(PerformanceAnalytics)
+
+
+ joined_data <- left_join(sp100_returns_RI_60_long, fama_french, by= c("date"))
+
+ joined_data <- mutate(joined_data, 
+       monthly_ret_rf = Stock.returns - RF)
+
+ require(xts)
+ regr_fun <- function(data_xts) {
+    lm(monthly_ret_rf ~ Mkt.RF, data = as_data_frame(data_xts)) %>%
+        coef()
+ }
+
+ beta_alpha <- joined_data %>% 
+    tq_mutate(mutate_fun = rollapply,
+              width      = 60,
+              FUN        = regr_fun,
+              by.column  = FALSE,
+              col_rename = c("alpha", "beta"))
+
+ beta_alpha
 ```
 
-```{r Checking if there is any NA in our dataset}
-any(is.na(sp100_RI))
-any(is.na(sp100_MV))
-```
-__Calculating the simple returns of the US-stocks__
-
-```{r Returns in %}
-calc <- function(x) diff(x)/x[-length(x)] * 100
-op <- sp100_RI[,-1]
-
-return <- data.matrix(op)
-return <- apply(return, 2, calc)
-any(is.na(return))
-date <- dplyr::select(sp100, "date")
-date = date[-1,]
-date <- as.data.frame(date, col.names = date)
-return <- cbind(date,return)
-return <- return[-59,]
-view(return)
+```{r}
+ beta_alpha_filter <- filter(beta_alpha, !is.na(alpha))
+ symbol_beta_alpha <- beta_alpha_filter %>%
+    select(symbol, alpha, beta)
+ symbol_beta_alpha 
 ```
 
-```{r Shaping the Factors in order to get the RF}
-sff = sff[-c(1,2,3,4,5,6,7,8,9,10),]
-FFF <- dplyr::select(sff, c("date", "RF"))
-view(FFF)
+```{r}
+ alpha <- beta_alpha %>%
+    select(symbol, alpha)
 ```
 
-```{r Checking Na}
-any(is.na(FFF))
-any(is.na(return))
+```{r}
+ beta <- beta_alpha_filter %>%
+    select(symbol, beta)
+ beta
+```
+
+```{r}
+ library(dplyr)
+ means_sp100_RI_60 <- joined_data %>%
+    group_by(symbol) %>%
+    summarize(mu = mean(monthly_ret_rf, na.rm=TRUE))
+ means_sp100_RI_60
+```
+
+```{r}
+ mu.hat <- mutate(beta_alpha, 
+       mu_capm = beta * mean(Mkt.RF))
+
+ mu.hat <- filter(mu.hat, !is.na(alpha))
+ mu.hat <- mu.hat  %>%
+    select(symbol, alpha, beta, mu_capm)
+
+ mu.hat <- left_join(mu.hat, means_sp100_RI_60, group_by= "symbol")
+
+ sml.fit <- lm(mu_capm~beta, mu.hat)
+
+ install.packages("plotly")
+ library(plotly)
+
+ p <- plot_ly(mu.hat, x = ~beta, y = ~mu_capm, type = 'scatter', mode = 'line', text = ~paste('symbol:', symbol)) %>%
+    add_markers(x = ~beta, y = ~mu)
+
+ p
+```
+
+ d) In a next step (following both documents), we sort the stocks according to their beta and build ten value-weighted portfolios (with more or less the same number of stocks). Repeat a) for the ten portfolios. What do you observe?
+
+```{r}
+ sp100_monthly_MV <- read_excel("sp100 monthly MV.xlsx")
+ head(sp100_monthly_MV, n=10)
+
+ anyNA(sp100_monthly_MV)
+ sp100_monthly_MV <- gather(sp100_monthly_MV, key = symbol, value= value, "AMAZON.COM":"CHARTER COMMS.CL.A")
+ anyNA(sp100_daily_RI_prices)
+```
+ mean value
+```{r}
+ mean_sp100_MV <- sp100_monthly_MV %>% 
+    group_by(symbol) %>%
+    summarize(mean_value = mean(value, na.rm=TRUE))
+```
+
+```{r}
+symbol_beta_alpha_value <- left_join(mean_sp100_MV, beta,  by= "symbol")
+```
+
+```{r}
+ symbol_beta_alpha_value <- arrange(symbol_beta_alpha_value, beta)
+ symbol_beta_alpha_value
+```
+
+Create weights
+```{r}
+ Portfolio1 <- symbol_beta_alpha_value[1:10,]
+ sum_weights1 <- sum(Portfolio1$mean_value)
+ weight_portfolio1 <- Portfolio1$mean_value/sum_weights1
+
+ Portfolio2 <- symbol_beta_alpha_value[11:20,]
+ sum_weights2 <- sum(Portfolio2$mean_value)
+ weight_portfolio2 <- Portfolio2$mean_value/sum_weights2
+
+ Portfolio3 <- symbol_beta_alpha_value[21:30,]
+ sum_weights3 <- sum(Portfolio3$mean_value)
+ weight_portfolio3 <- Portfolio3$mean_value/sum_weights3
+
+ Portfolio4 <- symbol_beta_alpha_value[31:40,]
+ sum_weights4 <- sum(Portfolio4$mean_value)
+ weight_portfolio4 <- Portfolio4$mean_value/sum_weights4
+
+ Portfolio5 <- symbol_beta_alpha_value[41:50,]
+ sum_weights5 <- sum(Portfolio5$mean_value)
+ weight_portfolio5 <- Portfolio5$mean_value/sum_weights5
+
+ Portfolio6 <- symbol_beta_alpha_value[51:60,]
+ sum_weights6 <- sum(Portfolio6$mean_value)
+ weight_portfolio6 <- Portfolio6$mean_value/sum_weights6
+
+ Portfolio7 <- symbol_beta_alpha_value[61:70,]
+ sum_weights7 <- sum(Portfolio7$mean_value)
+ weight_portfolio7 <- Portfolio7$mean_value/sum_weights7
+
+ Portfolio8 <- symbol_beta_alpha_value[71:80,]
+ sum_weights8 <- sum(Portfolio8$mean_value)
+ weight_portfolio8 <- Portfolio8$mean_value/sum_weights8
+
+ Portfolio9 <- symbol_beta_alpha_value[81:90,]
+ sum_weights9 <- sum(Portfolio9$mean_value)
+ weight_portfolio9 <- Portfolio9$mean_value/sum_weights9
+
+ Portfolio10 <- symbol_beta_alpha_value[91:nrow(symbol_beta_alpha_value),]
+ sum_weights10 <- sum(Portfolio10$mean_value)
+ weight_portfolio10 <- Portfolio10$mean_value/sum_weights10
 ```
 
 
-c) Now subtract the risk-free rate from all the stocks. Then estimate each stocks beta with the market: Regress all stock excess returns on the market excess return and save all betas (optimally use `mutate` and `map` in combination with `lm`). Estimate the mean-return for each stock and plot the return/beta-combinations. Create the security market line and include it in the plot! What do you find?
+Returns Portfolio
+```{r}
+ sp100_returns_RI_60_wide <- sp100_returns_RI_60_long %>% spread(symbol, Stock.returns)
 
-```{r Substracting the risk-free rate from all the stocks}
-date <- return[,1]
-return <- return [,-1]
-ad_return <- return - FFF$RF
-date <- as.data.frame(date, col.names = date)
-return <- cbind(date,return)
-return <- return[-59,]
-ad_return <- cbind(date,ad_return)
-ad_return <- return[-59,]
+ portfolio1_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio1$symbol)]
+ portfolio1_returns_long <- gather(portfolio1_returns_wide, key = symbol, value= returns, c(Portfolio1$symbol))
+ portfolio1_returns<- portfolio1_returns_long %>%
+  tq_portfolio(assets_col = symbol,
+               returns_col = returns,
+               weights = weight_portfolio1,
+               col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 1")
+
+ portfolio2_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio2$symbol)]
+ portfolio2_returns_long <- gather(portfolio2_returns_wide, key = symbol, value= returns, c(Portfolio2$symbol))
+ portfolio2_returns<- portfolio2_returns_long %>%
+  tq_portfolio(assets_col = symbol,
+               returns_col = returns,
+               weights = weight_portfolio2,
+               col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 2")
+
+ portfolio3_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio3$symbol)]
+ portfolio3_returns_long <- gather(portfolio3_returns_wide, key = symbol, value= returns, c(Portfolio3$symbol))
+ portfolio3_returns<- portfolio3_returns_long %>%
+  tq_portfolio(assets_col = symbol,
+               returns_col = returns,
+               weights = weight_portfolio3,
+               col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 3")
+
+ portfolio4_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio4$symbol)]
+ portfolio4_returns_long <- gather(portfolio4_returns_wide, key = symbol, value= returns, c(Portfolio4$symbol))
+ portfolio4_returns<- portfolio4_returns_long %>%
+  tq_portfolio(assets_col = symbol,
+               returns_col = returns,
+               weights = weight_portfolio4,
+               col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 4")
+
+ portfolio5_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio5$symbol)]
+ portfolio5_returns_long <- gather(portfolio5_returns_wide, key = symbol, value= returns, c(Portfolio5$symbol))
+ portfolio5_returns<- portfolio5_returns_long %>%
+  tq_portfolio(assets_col = symbol,
+               returns_col = returns,
+               weights = weight_portfolio5,
+               col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 5")
+
+ portfolio6_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio6$symbol)]
+ portfolio6_returns_long <- gather(portfolio6_returns_wide, key = symbol, value= returns, c(Portfolio6$symbol))
+ portfolio6_returns<- portfolio6_returns_long %>%
+  tq_portfolio(assets_col = symbol,
+               returns_col = returns,
+               weights = weight_portfolio6,
+               col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 6")
+
+ portfolio7_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio7$symbol)]
+ portfolio7_returns_long <- gather(portfolio7_returns_wide, key = symbol, value= returns, c(Portfolio7$symbol))
+ portfolio7_returns<- portfolio7_returns_long %>%
+  tq_portfolio(assets_col = symbol,
+               returns_col = returns,
+               weights = weight_portfolio7,
+               col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 7")
+
+ portfolio8_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio8$symbol)]
+ portfolio8_returns_long <- gather(portfolio8_returns_wide, key = symbol, value= returns, c(Portfolio8$symbol))
+ portfolio8_returns<- portfolio8_returns_long %>%
+  tq_portfolio(assets_col = symbol,
+               returns_col = returns,
+               weights = weight_portfolio8,
+               col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 8")
+
+ portfolio9_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio9$symbol)]
+ portfolio9_returns_long <- gather(portfolio9_returns_wide, key = symbol, value= returns, c(Portfolio9$symbol))
+ portfolio9_returns<- portfolio9_returns_long %>%
+  tq_portfolio(assets_col = symbol,
+               returns_col = returns,
+               weights = weight_portfolio9,
+               col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 9")
+
+ portfolio10_returns_wide <- sp100_returns_RI_60_wide[c("date", Portfolio10$symbol)]
+ portfolio10_returns_long <- gather(portfolio10_returns_wide, key = symbol, value= returns, c(Portfolio10$symbol))
+ portfolio10_returns<- portfolio10_returns_long %>%
+  tq_portfolio(assets_col = symbol,
+               returns_col = returns,
+               weights = weight_portfolio10,
+               col_rename = "Portfolio.returns") %>% mutate(Portfolio = "Portfolio 10")
+
+ allportfolio_returns <- rbind(portfolio1_returns, portfolio2_returns, portfolio3_returns, portfolio4_returns, portfolio5_returns, portfolio6_returns, portfolio7_returns, portfolio8_returns, portfolio9_returns, portfolio10_returns)
+
+ allportfolio_returns <- allportfolio_returns %>% group_by(Portfolio)
+ allportfolio_returns
 ```
 
-##ACHTUNG##
-__Alles was jetzt kummt isch risky business bin ma ned sicher, ob des so passt__
+```{r}
+ joined_data_portfolio <- left_join(allportfolio_returns, fama_french, by= c("date"))
 
+ joined_data_portfolio <- mutate(joined_data_portfolio, 
+       monthly_ret_rf = Portfolio.returns - RF)
 
-__INFO__
-Kann nur dia Files empfehle als alternativ Lösung, aber wegat am Market Input tät i obacht gea, weil mit getSymbols gohts ned zumindest ned bei mir.
+ require(xts)
+ regr_fun_portfolio <- function(data_xts) {
+    lm(monthly_ret_rf ~ Mkt.RF, data = as_data_frame(data_xts)) %>%
+        coef()
+ }
 
-```{r Estimating beta with the market??????????????????????????}
-#Create XTS
-sff$RF <- sff$RF /100 # Als Market nehmen wir an das es uf die FF-Factors bezogen isch was also nur der Riskofreie Markt isch do müsst ma uns no was ifalla lo im Sinne Returns from S&P500 (^GSPC) oder so nea.
-mkt_xts <- tk_xts(data = sff, date_var = date)
-port_rf_xts <- ad_return %>%
-  tk_xts(date_var = date, silent = TRUE)
-
-#Calculate Betas for each portfolio
-betas_port <- lm(port_rf_xts ~ mkt_xts[, 1])
-betas_port<- CAPM.beta(Ra = port_rf_xts, Rb = mkt_xts[, 1], Rf = 0)
+ beta_alpha_portfolio <- joined_data_portfolio %>% 
+    tq_mutate(mutate_fun = rollapply,
+              width      = 60,
+              FUN        = regr_fun_portfolio,
+              by.column  = FALSE,
+              col_rename = c("alpha", "beta"))
+ beta_alpha_portfolio
 ```
 
-```{r Return/Beta Combination}
-#Estimate Mean Return
-mean_portf_rf_xts <- lapply(port_rf_xts, FUN=mean)
-mean_portf_rf_xts <- as.data.frame(mean_portf_rf_xts)
 
-#Plot the return/beta-combinations
-plot.default(x = betas_port, xlim=c(0, 2),
-             y = mean_portf_rf_xts, ylim=c(0, 1),
-             xlab = "Beta", ylab = "Mean Return",
-             main = "Return/Beta-combinations")
+```{r}
+ beta_alpha_portfolio_filter <- filter(beta_alpha_portfolio, !is.na(alpha))
+ symbol_beta_alpha_portfolio <- beta_alpha_portfolio_filter %>%
+    select(Portfolio, alpha, beta)
+ symbol_beta_alpha_portfolio
 ```
-```{r Adding the SML}
-mean_mkt <- lapply(mkt_xts[, 1], FUN=mean)
-mean_mkt <- as.data.frame(mean_mkt)
-y_mkt <- mean_mkt[1, 1]
-plot.default(x = betas_port, xlim=c(0, 2),
-             y = mean_portf_rf_xts, ylim=c(0, 1),
-             xlab = "Beta", ylab = "Mean Return",
-             main = "Return/Beta-combinations",
-             abline(0, y_mkt))
 
-plot.default(x = betas_port, xlim=c(0, 2), 
-             y = mean_portf_rf_xts, ylim=c(0, 10), #einziger Unterschied zum oberen Plot, wahrscheinlich andere Zoom_Settings.
-             xlab = "Beta", ylab = "Mean Return",
-             main = "Return/Beta-combinations",
-             abline(0, y_mkt))
-#summary
-summary_CAPM_portf <- (table.CAPM(Ra = port_rf_xts, Rb = mkt_xts[, 1], Rf = 0)[1:9, ])
-summary_CAPM_portf
+```{r}
+ alpha_portfolio <- beta_alpha_portfolio %>%
+    select(Portfolio, alpha)
 ```
-The majority of the stocks have a smaller beta so they behave are more "risk averse" the Market has not so a big impact on the single stocks or at least the majority of it. There are a bunch of good performer, but the issue is it highly depends which "market" you chosse as a Security Market Line (SML).
 
 
-__?NEXT STEPS?__
-Im Bereich Files findasch dia Dokumente, aber wias usschaut müsstan mir nomol uns Daten abazüha 
+```{r}
+ beta_portfolio <- beta_alpha_portfolio %>%
+    select(Portfolio, beta)
+```
 
-d) In a next step (following both documents), we sort the stocks according to their beta and build ten value-weighted portfolios (with more or less the same number of stocks). Repeat a) for the ten portfolios. What do you observe?
+```{r}
+ means_Portfolio <- joined_data_portfolio %>%
+    group_by(Portfolio) %>%
+    summarize(mu = mean(monthly_ret_rf, na.rm=TRUE))
+ means_Portfolio
+```
 
-e) In the third step you follow page 6-8 of the second document and estimate the second-pass regression with the market and then market & idiosyncratic risk. What do you observe? Present all your results in a similar fashion as in the document.
+```{r}
+ return_beta_portfolio <- left_join(means_Portfolio, beta_portfolio, by="Portfolio")
 
+ mu.hat_portfolio <- mutate(beta_alpha_portfolio, 
+       mu_capm_portfolio = beta * mean(Mkt.RF))
+
+ mu.hat_portfolio <- filter(mu.hat_portfolio, !is.na(alpha))
+ mu.hat_portfolio <- mu.hat_portfolio  %>%
+    select(Portfolio, alpha, beta, mu_capm_portfolio)
+
+ mu.hat_portfolio <- left_join(mu.hat_portfolio, means_Portfolio, by = "Portfolio")
+
+ sml.fit_portfolio <- lm(mu_capm_portfolio~beta, mu.hat_portfolio)
+
+ library(plotly)
+
+ p_portfolio <- plot_ly(mu.hat_portfolio, x = ~beta, y = ~mu_capm_portfolio, type = 'scatter', mode = 'line', text = ~paste('Portfolio:', Portfolio)) %>%
+    add_markers(x = ~beta, y = ~mu)
+
+ p_portfolio
+```
+
+ e) In the third step you follow page 6-8 of the second document and estimate the second-pass regression with the market and then market & idiosyncratic risk. What do you observe? Present all your results in a similar fashion as in the document.
+
+```{r}
+ require(xts)
+ regr_fun_residuals <- function(data_xts) {
+    data_xts <- lm(monthly_ret_rf ~ Mkt.RF, data = as_data_frame(data_xts))
+ R <- summary(data_xts)$sigma^2
+ return(R)
+ }
+
+ residuals <- joined_data %>% 
+    tq_mutate(mutate_fun = rollapply,
+              width      = 60,
+              FUN        = regr_fun_residuals,
+              by.column  = FALSE,
+              col_rename = c("Residuals"))
+
+ residuals_only <- filter(residuals, !is.na(Residuals))
+ symbol_residuals <- residuals_only %>%
+    select(symbol, Residuals)
+
+ mean_MKt.RF <- joined_data %>%
+    group_by(symbol) %>%
+    summarize(mu_MKt_RF = mean(Mkt.RF, na.rm=TRUE))
+
+ first <- left_join(symbol_beta_alpha, symbol_residuals, by = "symbol" )
+
+ second <- left_join(mean_MKt.RF, means_sp100_RI_60,  by = "symbol" )
+
+ all_inputs <- left_join(first, second,  by = "symbol" )
+
+ second_pass_regression <- lm(mu~ beta + Residuals, all_inputs)
+
+ summary(second_pass_regression)
+```
+
+```{r}
+p
+```
+
+
+```{r}
+ require(xts)
+ regr_fun_residuals <- function(data_xts) {
+    data_xts <- lm(monthly_ret_rf ~ Mkt.RF, data = as_data_frame(data_xts))
+ R <- summary(data_xts)$sigma^2
+ return(R)
+ }
+
+ residuals_portfolio <- joined_data_portfolio %>% 
+    tq_mutate(mutate_fun = rollapply,
+              width      = 60,
+              FUN        = regr_fun_residuals,
+              by.column  = FALSE,
+              col_rename = c("Residuals"))
+
+ residuals_only_portfolio <- filter(residuals_portfolio, !is.na(Residuals))
+ symbol_residuals_portfolio <- residuals_only_portfolio %>%
+    select(Portfolio, Residuals)
+
+ mean_MKt.RF_portfolio <- joined_data_portfolio %>%
+    group_by(Portfolio) %>%
+    summarize(mu_MKt_RF = mean(Mkt.RF, na.rm=TRUE))
+
+ first_portfolio <- left_join(symbol_beta_alpha_portfolio, symbol_residuals_portfolio, by = "Portfolio" )
+
+ second_portfolio <- left_join(mean_MKt.RF_portfolio, means_Portfolio,  by = "Portfolio" )
+
+ all_inputs_portfolio <- left_join(first_portfolio, second_portfolio,  by = "Portfolio" )
+
+ second_pass_regression_portfolio <- lm(mu~ beta + Residuals, all_inputs_portfolio)
+
+ summary(second_pass_regression_portfolio)
+```
+
+```{r}
+ p_portfolio
+```
 
 ## Exercise 3: Calculating and checking the CAPM cont.
 
@@ -416,8 +781,11 @@ Go to Kenneth French's Homepage  again and download the following datasets: "Por
 We can use returns as they are in the files (simple returns)!
 
 a)	Subtract the risk-free rate from the first set of 10 portfolios (only sorted on beta) (Lo 10,., Hi 10) and estimate each stocks beta with the market. Estimate the mean-return for each stock and plot the return/beta-combinations. Create the security market line and include it in the plot! What do you find? (You can split the file in 2-3 different time blocks and see if something changes). * Now we are done with the first-pass regression.*
-b)	In the second-pass regression we now regress the average stock returns on the betas estimated before. What do you find in the coefficients and does this contradict the CAPM? Try different time periods again and see what you find. (all of the interpretations are in BKM pp.416f). 
+
+b)	In the second-pass regression we now regress the average stock returns on the betas estimated before. What do you find in the coefficients and does this contradict the CAPM? Try different time periods again and see what you find. (all of the interpretations are in BKM pp.416f).
+
 c)	Now do the extended second pass regression (regress on betas and residual-sds that you can extract from the regression) and see what you find for different periods. Interpret according to concept check 13.2. One of the (many) problems of the CAPM can be the correlation between residual variances and betas. Calculate and interpret.
+
 d)	Try again with 25 portfolios sorted on size and beta. What do you find? Is that interesting? 
 
 ```{r}
@@ -443,7 +811,6 @@ mkt_factors <- read_csv(unz(temp, mkt_factors_csv), skip = 3, quote = "\",") %>%
   mutate_at(vars(-date), as.numeric) %>%
   mutate(date = rollback(ymd(parse_date_time(date, "%Y%m") + months(1)))) %>%
   filter(date >= first('1964-01-01') & date <= '2018-12-31')
-
 ```
 
 a)	Subtract the risk-free rate from the first set of 10 portfolios (only sorted on beta) (Lo 10,., Hi 10) and estimate each stocks beta with the market.
