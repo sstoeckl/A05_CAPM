@@ -23,6 +23,19 @@ b) Maximum Quadratic Utility Portfolios
 
 adding (individually/together) all the different constraints and highlighting the different portfolios (portfolios performances) including rebalancing over an appropriate time-frame. The goal is, that after doing this exercise you are familiar with the constraints and their consequences.
 
+First, we download the data. I use the following stocks (=same as in the previous assignments:
+
+-"MSFT"
+-"AAPL"
+-"WMT"
+-"BA"
+-"GS"
+-"MMM"
+-"ADSK"
+-"CSCO"
+-"ADBE"
+-"AMZN"
+
 
 ```{r}
 #download data
@@ -51,8 +64,9 @@ stock.returns.monthly <- stock.prices %>%
 stock.returns.monthly
 ```
 
+
+In this step, we put it into a tibble. 
 ```{r}
-#put it into a tibble
 
 R <- pivot_wider(stock.returns.monthly,
                                                 names_from = symbol,
@@ -66,57 +80,50 @@ tk_xts
 
 ```
 
-a) Minimum Variance Portfolio
+### a) Minimum Variance Portfolio
 
-###first example is with the full investment constraint
-
+#### Mininum Variance Portfolio with Full investment Constraint
+The first example is with the full investment constraint. For this, we create our min-var portfolio and add the constraint. After that, we add the objective to minimize the variance. 
 ```{r}
-# Create portfolio object
 portf_minvar <- portfolio.spec(assets=stockselection)
-# Add full investment constraint to the portfolio object
 portf_minvar <- add.constraint(portfolio=portf_minvar, type="full_investment")
-# Add objective to minimize variance
 portf_minvar <- add.objective(portfolio=portf_minvar, type="risk", name="var")
 portf_minvar
 ```
 
 
+Now, we run the optimization for our minimum variance portfolio. 
 ```{r}
-# Run the optimization - minimum variance portfolio
 opt_gmv <- optimize.portfolio(R=R, portfolio=portf_minvar,
                               optimize_method="ROI", trace=TRUE)
 print(opt_gmv)
 ```
 
 
+Next, we create the efficient frontier. 
 ```{r}
 portf_minvaref<- create.EfficientFrontier(R=R, portfolio = portf_minvar, type = "mean-StdDev", match.col = "StdDev")
 chart.EfficientFrontier(portf_minvaref, match.col = "StdDev", type = "b", rf = NULL, pch.assets = 1)
 ```
 
 
+Now, we rebalance it with training period = 24 (2 years).
 ```{r}
-#rebalancing
 bt_gmv <- optimize.portfolio.rebalancing(R=R,portfolio=portf_minvar,
                                          optimize_method="ROI",
                                          rebalance_on="months",
-                                         training_period=156)
-
-#we chose a training period of 156 months --> 13 years to have enough historical data to use for rebalancing and moreover our chart is easier to read
-#furthermore, we chose monthly rebalancing, because we have monthly data and it is important to rebalance as soon and as often as possible
-
+                                         training_period=24)
 bt_gmv
-
 chart.Weights(bt_gmv)
 returns_gmv <- Return.portfolio(R = R, weights = extractWeights(bt_gmv))
 ```
 
-###second we use a long-only constraint
+#### Mininum Variance Portfolio with Long Only Constraint. 
 
+#### Mininum Variance Portfolio with long only constraint and full investment constraint
+
+Now, we add the long only constraint - we do not allow for short selling. 
 ```{r}
-# Add long only constraints to a new portfolio to show the difference
-#so we do not allow for short selling now
-
 portf_minvar_2 <- portfolio.spec(assets=stockselection)
 portf_minvar_2 <- add.constraint(portfolio=portf_minvar_2, type="box",
                                min=0, max=1)
@@ -124,34 +131,32 @@ portf_minvar_2 <- add.objective(portfolio=portf_minvar_2, type="risk", name="var
 portf_minvar_2
 ```
 
+Next, we run the optimization. 
 ```{r}
-#Optimization
-# Run the optimization
 opt_minvar_2 <- optimize.portfolio(R=R, portfolio=portf_minvar_2,
                                  optimize_method="ROI", trace=TRUE)
 print(opt_minvar_2)
 ```
 
 We plot the efficient frontier (long only) to compare it with the first plot which has the full investment constraint.
-
 ```{r}
 portf_minvaref_2 <- create.EfficientFrontier(R=R, portfolio = portf_minvar_2, type = "mean-StdDev", match.col = "StdDev")
 chart.EfficientFrontier(portf_minvaref_2, match.col = "StdDev", type = "b", rf = NULL, pch.assets = 1)
 ```
 
-Now we do not go for short in any stock.
-
+Now, we rebalance it with training period = 24 (2 years).
 ```{r}
 bt_minvar_2 <- optimize.portfolio.rebalancing(R=R, portfolio=portf_minvar_2,
                                             optimize_method="ROI",
                                             rebalance_on="months",
-                                            training_period=156)
-
+                                            training_period=24)
 bt_minvar_2
-
 chart.Weights(bt_minvar_2)
 returns_minvar <- Return.portfolio(R = R, weights = extractWeights(bt_minvar_2))
 ```
+
+#### Mininum Variance Portfolio Group Constraint. 
+
 
 ###third we use group constraint
 Our stocks:
@@ -161,6 +166,11 @@ Grouped by sector:
 Group A: MSFT, AAPL, ADSK, ADBE, CSCO - Software Companies
 Group B: WMT, AMZN - online and offline shopping
 Group C: BA, GS, MMM - rest
+
+We tell it to invest as follows in the groups
+Group A: 30% - 80% 
+Group B: 20% - 70%
+Group C: 0%  - 50%
 
 ```{r}
 # Add group constraints to a new one in order to compare it and see differences
@@ -176,33 +186,35 @@ portf_minvar_3 <- add.objective(portfolio=portf_minvar_3, type="risk", name="var
 portf_minvar_3
 ```
 
+Next, we run the optimization. 
 ```{r}
-#Optimization
-# Run the optimization
 opt_minvar_3 <- optimize.portfolio(R=R, portfolio=portf_minvar_3,
                                  optimize_method="ROI", trace=TRUE)
 print(opt_minvar_3)
 ```
+
+Next, we plot the efficient frontiers. 
 ```{r}
 portf_minvaref_3 <- create.EfficientFrontier(R=R, portfolio = portf_minvar_3, type = "mean-StdDev", match.col = "StdDev")
 chart.EfficientFrontier(portf_minvaref_3, match.col = "StdDev", type = "b", rf = NULL, pch.assets = 1)
 ```
 
 
+Now, we rebalance it with training period = 24 (2 years).
 ```{r}
 bt_minvar_3 <- optimize.portfolio.rebalancing(R=R, portfolio=portf_minvar_3,
                                             optimize_method="ROI",
                                             rebalance_on="months",
-                                            training_period=156)
-
+                                            training_period=24)
 bt_minvar_3
-
 chart.Weights(bt_minvar_3)
 returns_minvar <- Return.portfolio(R=R, weights=extractWeights(bt_minvar_3))
 ```
 
-###now we put two constraints together
-- add.constraint(portfolio=pspec, type="return", return_target=0.007)
+#### Mininum Variance Portfolio Group Constraint + box constraint.
+
+Now, we combine the group constraint with the box constraint.
+Box constraints allows the user to specify upper and lower bounds on the weights of the assets. Here we add box constraints for the asset weights so that the minimum weight of any asset must be greater than or equal to 0 5 and the maximum weight of any asset must be less than or equal to 1.
 ```{r}
 portf_minvar_4 <- portfolio.spec(assets=stockselection)
 portf_minvar_4 <- add.constraint(portfolio=portf_minvar_4, type="box",
@@ -218,47 +230,80 @@ portf_minvar_4 <- add.constraint(portfolio=portf_minvar_4,
 portf_minvar_4
 ```
 
+
+Next, we run the optimization. 
 ```{r}
-#Optimization
-# Run the optimization
 opt_minvar_4 <- optimize.portfolio(R=R, portfolio=portf_minvar_4,
                                  optimize_method="ROI", trace=TRUE)
 print(opt_minvar_4)
 ```
 
+Next, we plot the efficient frontiers. 
+```{r}
+portf_minvaref_4 <- create.EfficientFrontier(R=R, portfolio = portf_minvar_4, type = "mean-StdDev", match.col = "StdDev")
+chart.EfficientFrontier(portf_minvaref_4, match.col = "StdDev", type = "b", rf = NULL, pch.assets = 1)
+```
+
+Now, we rebalance it with training period = 24 (2 years).
 ```{r}
 bt_minvar_4 <- optimize.portfolio.rebalancing(R=R, portfolio=portf_minvar_4,
                                             optimize_method="ROI",
                                             rebalance_on="months",
-                                            training_period=156)
-
+                                            training_period=24)
 bt_minvar_4
-
 chart.Weights(bt_minvar_4)
 returns_minvar <- Return.portfolio(R=R, weights=extractWeights(bt_minvar_4))
 ```
+
+### plot of the weights minimum variance portfolios with our constraints
+
+
+```{r}
+print(opt_gmv)
+print(opt_minvar_2)
+print(opt_minvar_3)
+print(opt_minvar_4)
+```
+
+```{r}
+chart.EfficientFrontier(portf_minvaref, match.col = "StdDev", type = "b", rf = NULL, pch.assets = 1,main="efficient frontier - full investment")
+chart.EfficientFrontier(portf_minvaref_2, match.col = "StdDev", type = "b", rf = NULL, pch.assets = 1, main="efficient frontier - long only")
+chart.EfficientFrontier(portf_minvaref_3, match.col = "StdDev", type = "b", rf = NULL, pch.assets = 1, main="efficient frontier - group constraint")
+chart.EfficientFrontier(portf_minvaref_4, match.col = "StdDev", type = "b", rf = NULL, pch.assets = 1, main="efficient frontier - group constraint & long only")
+```
+
+```{r}
+chart.Weights(bt_gmv)
+title(main = "Mininum Variance Portfolio with Full investment Constraint")
+chart.Weights(bt_minvar_2)
+title(main = "Mininum Variance Portfolio with long only constraint and full investment constraint")
+chart.Weights(bt_minvar_3)
+title(main = "Mininum Variance Portfolio Group Constraints")
+chart.Weights(bt_minvar_4)
+title(main = "Mininum Variance Portfolio Group Constraint + box constraint")
+```
+
+
 b) Maximum Quadratic Utility Portfolios
 
-### Maximum Quadratic Utility Portfolio with full investment constraint and long only constraint
+### Maximum Quadratic Utility Portfolio with full investment constraint (now we deleted it) and long only constraint
 
 First, we create the initial portfolio object.
 ```{r}
 init_portf <- portfolio.spec(assets=stockselection)
 ```
 
-Then, we create our constraints and cominbe them in a list. 
+Then, we create our constraints and combine them in a list. 
 ```{r}
-fi_constr <- weight_sum_constraint(type="full_investment")
 lo_constr <- box_constraint(type="long_only", assets=init_portf$assets)
-qu_constr <- list(fi_constr, lo_constr)
+qu_constr <- list(lo_constr)
 ```
 
 Next, we create the objective. The variance objective specifies a risk aversion parameter which defines how much variance is accepted. 
 After that, we combine these objectives in a list. 
 ```{r}
 ret_obj <- return_objective(name="mean")
-
-var_obj <- portfolio_risk_objective(name="var", risk_aversion=4.00)
+var_obj <- portfolio_risk_objective(name="var", risk_aversion=2.00)
 qu_obj <- list(ret_obj, var_obj)
 ```
 
@@ -272,19 +317,19 @@ opt_qu <- optimize.portfolio(R=R, portfolio=init_portf,
 opt_qu
 ```
 
-Now, we chart the weights, using a training period of 156. As we can see, it rebalances on 94 dates. 
+Now, we chart the weights, using a training period of 24. As we can see, it rebalances on 94 dates. 
 ```{r}
 bt_qu <- optimize.portfolio.rebalancing(R=R, portfolio=init_portf,
                                         constraints=qu_constr,
                                         objectives=qu_obj,
                                         optimize_method="ROI",
                                         rebalance_on="months",
-                                        training_period=156)
+                                        training_period=24)
 print(bt_qu)
-
 chart.Weights(bt_qu)
 returns_qu <- Return.portfolio(R = R, weights = extractWeights(bt_qu))
 ```
+
 
 ### Maximum Quadratic Utility Portfolio with group constraint
 
@@ -329,16 +374,15 @@ opt_qu_2 <- optimize.portfolio(R=R, portfolio=init_portf_2,
                              trace=TRUE)
 opt_qu_2
 ```
-Now, we rebalance it with training period = 156 (13 years).
+Now, we rebalance it with training period = 24 (2 years).
 ```{r}
 bt_qu_2 <- optimize.portfolio.rebalancing(R=R, portfolio=init_portf_2,
                                         constraints=qu_constr_2,
                                         objectives=qu_obj,
                                         optimize_method="ROI",
                                         rebalance_on="months",
-                                        training_period=156)
+                                        training_period=24)
 print(bt_qu_2)
-
 chart.Weights(bt_qu_2)
 returns_qu_2 <- Return.portfolio(R = R, weights = extractWeights(bt_qu_2))
 ```
@@ -361,7 +405,7 @@ qu_constr_3 <- list(ret_constr)
 Next, we create the return objectives. We use the same as before.  
 ````{r}
 ret_obj <- return_objective(name="mean")
-var_obj <- portfolio_risk_objective(name="var", risk_aversion=4.00)
+var_obj <- portfolio_risk_objective(name="var", risk_aversion=2.00)
 qu_obj <- list(ret_obj, var_obj)
 ```
 
@@ -375,39 +419,50 @@ opt_qu_3 <- optimize.portfolio(R=R, portfolio=init_portf_3,
 opt_qu_3
 ```
 
-Now, we rebalance it with training period = 156 (13 years).
+Now, we rebalance it with training period = 24 (2 years).
 ```{r}
 bt_qu_3 <- optimize.portfolio.rebalancing(R=R, portfolio=init_portf_3,
                                         constraints=qu_constr_3,
                                         objectives=qu_obj,
                                         optimize_method="ROI",
                                         rebalance_on="months",
-                                        training_period=156)
+                                        training_period=24)
 print(bt_qu_3)
-
 chart.Weights(bt_qu_3)
 returns_qu_3 <- Return.portfolio(R = R, weights = extractWeights(bt_qu_3))
 ```
 
 ### Maximum Quadratic Utility Portfolio with Factor Exposure Constraint
-
 The factor exposure constraint allows the user to set upper and lower bounds on exposures to risk factors. The exposures can be passed in as a vector or matrix. Here we specify a vector for B with arbitrary values, e.g. betas of the assets, with a market risk exposure range of 0.6 to 0.9.
-
 We create our second portfolio object.
+
 ```{r}
 init_portf_4 <- portfolio.spec(assets=stockselection)
 ```
 
+
+-"MSFT" = 0.92
+-"AAPL" = 1.31
+-"WMT" = 0.28
+-"BA" = 1.38
+-"GS" = 1.39
+-"MMM" = 0.97
+-"ADSK" = 1.51
+-"CSCO" = 0.85
+-"ADBE" = 0.97
+-"AMZN" = 1.35
+
+
 Now, we add the constraint and combine them in a list. 
 ```{r}
-exp_constr <- factor_exposure_constraint(assets=stockselection,B=c(-0.08, 0.37, 0.79, 1.43, 0.34, 1.2, 0.79, 1.12, 0.94, 1.23),lower=0.6, upper=0.9)
+exp_constr <- factor_exposure_constraint(assets=stockselection,B=c(0.92, 1.31, 0.28, 1.38, 1.39, 0.97, 1.51, 0.85, 0.97, 1.35),lower=0.6, upper=0.9)
 qu_constr_4 <- list(exp_constr)
 ```
 
 Next, we create the return objectives. We use the same as before.  
 ````{r}
 ret_obj <- return_objective(name="mean")
-var_obj <- portfolio_risk_objective(name="var", risk_aversion=4.00)
+var_obj <- portfolio_risk_objective(name="var", risk_aversion=2.00)
 qu_obj <- list(ret_obj, var_obj)
 ```
 
@@ -421,21 +476,37 @@ opt_qu_4 <- optimize.portfolio(R=R, portfolio=init_portf_4,
 opt_qu_4
 ```
 
-Now, we rebalance it with training period = 156 (13 years).
+Now, we rebalance it with training period = 24 (2 years).
 ```{r}
 bt_qu_4 <- optimize.portfolio.rebalancing(R=R, portfolio=init_portf_4,
                                         constraints=qu_constr_4,
                                         objectives=qu_obj,
                                         optimize_method="ROI",
                                         rebalance_on="months",
-                                        training_period=156)
+                                        training_period=24)
 print(bt_qu_4)
-
 chart.Weights(bt_qu_4)
 returns_qu_4 <- Return.portfolio(R = R, weights = extractWeights(bt_qu_4))
 ```
 
-Constraints that do not work with ROI
+### plots of the maximum quadratic utility portfolios
+```{r}
+opt_qu
+opt_qu_2
+opt_qu_3
+opt_qu_4
+```
+```{r}
+chart.Weights(bt_qu)
+title(main="long only")
+chart.Weights(bt_qu_2)
+title(main="group constraint")
+chart.Weights(bt_qu_3)
+title(main="target return constraint")
+chart.Weights(bt_qu_4)
+title(main="factor exposure constraint")
+```
+### Constraints that do not work with ROI
 - position limit constraints
 - diversification constraint
 - turnover constraint
